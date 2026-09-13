@@ -1,6 +1,7 @@
 package com.qwara.gomoku.ui.screens
 
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,7 @@ import androidx.wear.compose.material3.SwitchButton
 import androidx.wear.compose.material3.Text
 import com.qwara.gomoku.MainViewModel
 import com.qwara.gomoku.R
+import com.qwara.gomoku.data.SettingsRepository
 import com.qwara.gomoku.game.Rule
 import com.qwara.gomoku.ui.components.ChoiceButton
 import com.qwara.gomoku.ui.theme.CreamWhite
@@ -44,13 +46,28 @@ import com.qwara.gomoku.ui.theme.WoodAmber
 private const val MIN_ENGINE_SEC = 1
 private const val MAX_ENGINE_SEC = 10
 
+/** 棋力档位文案，与 SettingsRepository.STRENGTH_PRESETS 一一对应 */
+private val STRENGTH_LABELS = intArrayOf(
+    R.string.settings_strength_0,
+    R.string.settings_strength_1,
+    R.string.settings_strength_2,
+    R.string.settings_strength_3,
+    R.string.settings_strength_4,
+)
+
 @Composable
 fun SettingsScreen(vm: MainViewModel) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val versionName = remember(context) {
         runCatching {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+            val pm = context.packageManager
+            if (Build.VERSION.SDK_INT >= 33) {
+                pm.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0)).versionName
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(context.packageName, 0).versionName
+            }
         }.getOrNull().orEmpty()
     }
 
@@ -123,6 +140,104 @@ fun SettingsScreen(vm: MainViewModel) {
                     androidx.wear.compose.material3.Icon(Icons.Default.Add, stringResource(R.string.settings_increase))
                 }
             }
+        }
+
+        item {
+            SettingLabel(stringResource(R.string.settings_strength))
+        }
+        item {
+            val index = SettingsRepository.nearestStrengthIndex(settings.strength)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                IconButton(
+                    onClick = {
+                        vm.setStrength(SettingsRepository.STRENGTH_PRESETS[(index - 1).coerceAtLeast(0)])
+                    },
+                    enabled = index > 0,
+                ) {
+                    MinusGlyph()
+                }
+                Text(
+                    text = stringResource(STRENGTH_LABELS[index]),
+                    color = WoodAmber,
+                    modifier = Modifier.padding(horizontal = 10.dp),
+                )
+                IconButton(
+                    onClick = {
+                        vm.setStrength(
+                            SettingsRepository.STRENGTH_PRESETS[(index + 1).coerceAtMost(STRENGTH_LABELS.lastIndex)],
+                        )
+                    },
+                    enabled = index < STRENGTH_LABELS.lastIndex,
+                ) {
+                    androidx.wear.compose.material3.Icon(Icons.Default.Add, stringResource(R.string.settings_increase))
+                }
+            }
+        }
+        item {
+            Text(
+                text = stringResource(R.string.settings_strength_note),
+                color = CreamWhite.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+                fontSize = 10.sp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        item {
+            SettingLabel(stringResource(R.string.settings_lines))
+        }
+        item {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                SettingsRepository.ANALYSIS_LINES.forEach { n ->
+                    ChoiceButton(
+                        text = n.toString(),
+                        selected = settings.analysisLines == n,
+                        onClick = { vm.setAnalysisLines(n) },
+                    )
+                }
+            }
+        }
+
+        item {
+            SettingLabel(stringResource(R.string.settings_display))
+        }
+        item {
+            SwitchButton(
+                checked = settings.showMoveNumbers,
+                onCheckedChange = vm::setShowMoveNumbers,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.settings_display_numbers)) },
+            )
+        }
+        item {
+            SwitchButton(
+                checked = settings.showForbidden,
+                onCheckedChange = vm::setShowForbidden,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.settings_display_forbidden)) },
+            )
+        }
+        item {
+            SwitchButton(
+                checked = settings.showWinLine,
+                onCheckedChange = vm::setShowWinLine,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.settings_display_win_line)) },
+            )
+        }
+        item {
+            SwitchButton(
+                checked = settings.showCandidates,
+                onCheckedChange = vm::setShowCandidates,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.settings_display_candidates)) },
+            )
         }
 
         item {

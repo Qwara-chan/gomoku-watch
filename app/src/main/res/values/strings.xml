@@ -10,6 +10,8 @@
     <string name="menu_analysis">局面分析</string>
     <string name="menu_analysis_sub">Rapfi 引擎深度分析</string>
     <string name="menu_settings">设置</string>
+    <string name="menu_resume">继续对局</string>
+    <string name="menu_resume_sub">第 %1$d 手 · 棋盘仍保留</string>
 
     <!-- 通用 -->
     <string name="action_back">返回</string>
@@ -47,6 +49,20 @@
     <string name="settings_engine">引擎信息</string>
     <string name="settings_engine_loading">引擎加载中…</string>
     <string name="settings_about">关于</string>
+    <string name="settings_strength">引擎棋力</string>
+    <string name="settings_strength_value">%1$s</string>
+    <string name="settings_strength_note">仅影响人机对战，分析与提示始终满强度</string>
+    <string name="settings_strength_0">入门</string>
+    <string name="settings_strength_1">初级</string>
+    <string name="settings_strength_2">中级</string>
+    <string name="settings_strength_3">高级</string>
+    <string name="settings_strength_4">最强</string>
+    <string name="settings_lines">分析路数</string>
+    <string name="settings_display">显示</string>
+    <string name="settings_display_numbers">手数序号</string>
+    <string name="settings_display_forbidden">禁手标记</string>
+    <string name="settings_display_win_line">胜利连线</string>
+    <string name="settings_display_candidates">候选点标记</string>
 
     <!-- 分析 -->
     <string name="analysis_depth">深度 %1$d</string>
@@ -55,6 +71,17 @@
     <string name="analysis_eval">评估</string>
     <string name="analysis_pv">主要变例</string>
     <string name="analysis_best_move">最佳着法</string>
+
+    <!-- 评估曲线 -->
+    <string name="curve_title">评估曲线</string>
+    <string name="curve_scan_start">全谱分析</string>
+    <string name="curve_scan_cancel">取消分析</string>
+    <string name="curve_back_to_current">回到当前</string>
+    <string name="curve_collapse">收起</string>
+    <string name="curve_scanning">全谱分析中 %1$d/%2$d</string>
+    <string name="curve_readout">第 %1$d 手 · 黑方胜率 %2$d%%</string>
+    <string name="curve_no_value">第 %1$d 手 · 无评估</string>
+    <string name="curve_empty">点右上角按钮做全谱分析</string>
 
     <!-- 选择先后手 -->
     <string name="choose_color">选择执子</string>
@@ -87,6 +114,7 @@
     <string name="game_over_white">白棋获胜</string>
     <string name="action_play_again">再来一局</string>
     <string name="action_confirm_restart">确定</string>
+    <string name="action_view_board">查看棋盘</string>
     <string name="confirm_clear_title">清空棋盘？</string>
     <string name="confirm_clear_text">将移除全部棋子。</string>
     <string name="dialog_edit_mode">编辑模式</string>

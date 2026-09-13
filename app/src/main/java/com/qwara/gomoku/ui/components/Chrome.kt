@@ -39,12 +39,14 @@ import kotlin.math.sin
 @Composable
 fun EdgeCapsule(
     modifier: Modifier = Modifier,
+    /** 底色透明度：信息多的胶囊适当调低，便于看清被盖住的棋子与标记 */
+    alpha: Float = 0.68f,
     content: @Composable () -> Unit,
 ) {
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(50))
-            .background(PanelDark.copy(alpha = 0.68f))
+            .background(PanelDark.copy(alpha = alpha))
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,

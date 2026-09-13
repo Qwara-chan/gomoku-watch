@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -28,9 +29,12 @@ import java.util.regex.Pattern
  *  - [playUserMove] 用户走子（TURN），挂起等待引擎应着；
  *  - [takeback] 引擎内部局面回退一手（TAKEBACK）；
  *  - [syncAndAnalyze] 同步任意局面（YXBOARD）并开始 N 路分析（YXNBEST）；
+ *  - [scanAnalyze] 限时分析单个局面并等待引擎回到空闲（全谱扫描逐手评估）；
  *  - [stop] 停止搜索（STOP）；[stopAndAwait] 停止并等待空闲（改局面前调用）。
  *
  * 所有写操作在单线程调度器上串行执行；读线程逐行解析并更新 [status]。
+ * 注意引擎在思考期间会丢弃除 STOP/END 外的全部命令，因此发任何改局面命令前
+ * 都必须先 [stopAndAwait] 成功。
  */
 class RapfiEngine(private val context: Context) {
 
@@ -38,8 +42,16 @@ class RapfiEngine(private val context: Context) {
         private const val TAG = "RapfiEngine"
         private val MOVE_LINE: Pattern = Pattern.compile("^\\d+,\\d+( \\d+,\\d+)*$")
         private val COORD: Pattern = Pattern.compile("(\\d+),(\\d+)")
-        private val FORBID_POINT: Pattern = Pattern.compile("(\\d{2})(\\d{2})")
         private val MATE_EVAL: Pattern = Pattern.compile("([+-])M(\\d+)")
+
+        /** YXBOARD 中表示“停一手”的坐标，用于还原白先局面（引擎默认首手为黑） */
+        private const val PASS_ENTRY = "-1,-1,1"
+
+        /** INFO STRENGTH 的满强度值：分析/提示必须用满强度，否则引擎会随机挑点 */
+        private const val FULL_STRENGTH = 100
+
+        /** INFO STRENGTH 的取值范围（引擎侧 uint16，语义为 0–100） */
+        private const val MAX_STRENGTH = 100
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -48,15 +60,19 @@ class RapfiEngine(private val context: Context) {
     private val _status = MutableStateFlow(EngineStatus())
     val status: StateFlow<EngineStatus> = _status
 
+    /** 以下字段跨读线程与写调度线程访问，加 @Volatile 保证可见性 */
+    @Volatile
     private var curPv: PvLine? = null
+
+    @Volatile
     private var pvAccumulator = linkedMapOf<Int, PvLine>()
 
     /** 等待最终着法行的挂起点（playUserMove / engineMoveFirst） */
+    @Volatile
     private var awaitingMoves: CompletableDeferred<List<Pt>>? = null
-    private var awaitingForbid: CompletableDeferred<Set<Pt>>? = null
 
     @Volatile
-    private var readerRunning = false
+    private var readerThread: Thread? = null
 
     val isRunning: Boolean
         get() = runCatching { RapfiNative.isRunning() }.getOrDefault(false)
@@ -68,12 +84,12 @@ class RapfiEngine(private val context: Context) {
         withContext(writeDispatcher) {
             try {
                 val dir = EngineInstaller.ensureWeightsInstalled(context)
-                // 结束旧会话并等待协议线程退出
+                // 结束旧会话并等待协议线程退出（挂起等待，不占住写线程）
                 if (RapfiNative.isRunning()) {
                     RapfiNative.write("END")
                     var waited = 0L
                     while (RapfiNative.isRunning() && waited < 3000) {
-                        Thread.sleep(50)
+                        delay(50)
                         waited += 50
                     }
                 }
@@ -93,6 +109,11 @@ class RapfiEngine(private val context: Context) {
                 // 16 MB 置换表（手表内存受限；HASH_SIZE 单位为 KB）
                 send("INFO HASH_SIZE 16384")
                 send("START 15")
+                pvAccumulator.clear()
+                curPv = null
+                // 会话重建后旧请求不可能再有应答：立即失败，别让它等超时
+                awaitingMoves?.completeExceptionally(EngineException("引擎会话已重启"))
+                awaitingMoves = null
                 _status.value = EngineStatus(phase = EngineStatus.Phase.IDLE)
                 Result.success(Unit)
             } catch (t: Throwable) {
@@ -102,9 +123,14 @@ class RapfiEngine(private val context: Context) {
         }
 
     private fun startReader() {
-        if (readerRunning) return
-        readerRunning = true
-        Thread {
+        // 旧会话的读线程可能还在收尾：先等它退出，避免两个读线程争抢同一输出队列
+        readerThread?.let { old ->
+            if (old.isAlive) {
+                old.join(1000)
+                if (old.isAlive) Log.w(TAG, "previous reader still alive, lines may interleave")
+            }
+        }
+        readerThread = Thread {
             try {
                 while (true) {
                     val line = RapfiNative.readLine() ?: break
@@ -114,7 +140,9 @@ class RapfiEngine(private val context: Context) {
             } catch (t: Throwable) {
                 Log.w(TAG, "reader ended", t)
             } finally {
-                readerRunning = false
+                // 会话异常结束：让仍在等待的挂起点立即失败，而不是永久挂起
+                awaitingMoves?.completeExceptionally(EngineException("引擎会话已结束"))
+                awaitingMoves = null
             }
         }.apply {
             isDaemon = true
@@ -131,25 +159,34 @@ class RapfiEngine(private val context: Context) {
 
     // --------------------------------------------------------- 对弈
 
-    /** 引擎执黑先行，返回引擎着法 */
-    suspend fun engineMoveFirst(): Result<Pt> = withContext(writeDispatcher) {
+    /** 引擎执黑先行，返回引擎着法；[strength] 为棋力档位（0–100，100=满强度） */
+    suspend fun engineMoveFirst(strength: Int): Result<Pt> = withContext(writeDispatcher) {
         runCatching {
-            send("BEGIN")
-            awaitMoves().first()
+            prepareSearch(EngineStatus.Phase.THINKING)
+            // 先装挂起点再发命令：引擎应答可能早于挂起点建立
+            requestMoves {
+                sendStrength(strength)
+                send("BEGIN")
+            }.first()
         }
     }
 
     /**
      * 用户走子（引擎内部执另一色），返回引擎应着。
      * 会先把每步时限恢复为 [timeMs]（此前的“提示/分析”可能改过它）。
+     * [strength] 只在人机对战中生效；分析与提示固定满强度（见 [syncAndAnalyze]）。
      */
-    suspend fun playUserMove(x: Int, y: Int, timeMs: Int): Result<Pt> = withContext(writeDispatcher) {
-        runCatching {
-            send("INFO TIMEOUT_TURN $timeMs")
-            send("TURN $x,$y")
-            awaitMoves().first()
+    suspend fun playUserMove(x: Int, y: Int, timeMs: Int, strength: Int): Result<Pt> =
+        withContext(writeDispatcher) {
+            runCatching {
+                prepareSearch(EngineStatus.Phase.THINKING)
+                requestMoves {
+                    send("INFO TIMEOUT_TURN $timeMs")
+                    sendStrength(strength)
+                    send("TURN $x,$y")
+                }.first()
+            }
         }
-    }
 
     /** 悔棋一步（引擎内部局面回退一手） */
     suspend fun takeback(): Result<Unit> = withContext(writeDispatcher) {
@@ -160,43 +197,62 @@ class RapfiEngine(private val context: Context) {
 
     /**
      * 同步任意局面并开始分析。
-     * @param moves        完整着法序列（绝对颜色）
-     * @param engineColor  引擎视角的“本方”颜色（用于 SELF/OPPO 标记；分析模式传 null 表示纯观战）
+     * @param moves        完整着法序列（绝对颜色，首手可以是白——编辑/翻转后的局面）
      * @param nbest        输出前 N 路变化
      * @param timeMs       每步时限（0 表示无限——纯分析模式，须用 [stop] 手动停止）
      */
     suspend fun syncAndAnalyze(
         moves: List<Board.Move>,
-        engineColor: Board.Color?,
         nbest: Int,
         timeMs: Int,
     ): Result<Unit> = withContext(writeDispatcher) {
-        runCatching {
-            // 注意：分析模式必须 TIMEOUT_TURN=0，否则到达时限后引擎会自行结束并吐坐标，
-            // 且退出分析模式；timeMs>0 仅用于“提示”这种一次性场景
-            send("INFO TIMEOUT_TURN $timeMs")
-            send("YXBOARD")
-            for (m in moves) {
-                val side = when (engineColor) {
-                    Board.Color.BLACK -> 1
-                    Board.Color.WHITE -> 2
-                    else -> if (m.color == Board.Color.BLACK) 1 else 2
+        runCatching { sendBoardCommands(moves, nbest, timeMs) }
+    }
+
+    /**
+     * 分析单个局面并在 [timeMs] 到达后返回（引擎限时搜索结束会自行回到空闲）。
+     * 供全谱扫描逐手取评估值使用；调用前必须确保引擎空闲。
+     */
+    suspend fun scanAnalyze(moves: List<Board.Move>, timeMs: Int): Result<Unit> =
+        withContext(writeDispatcher) {
+            runCatching {
+                sendBoardCommands(moves, nbest = 1, timeMs = timeMs)
+                // 限时搜索结束后引擎输出最终着法行并转 IDLE；等不到就放弃这一手
+                val idle = withTimeoutOrNull(timeMs * 4L + 4000) {
+                    _status.first { it.phase == EngineStatus.Phase.IDLE }
                 }
-                send("${m.x},${m.y},$side")
+                if (idle == null) throw EngineException("分析超时")
             }
-            send("DONE")
-            // YXBOARD 不触发思考；开始 N 路分析
-            pvAccumulator.clear()
-            curPv = null
-            _status.update {
-                it.copy(
-                    phase = EngineStatus.Phase.ANALYZING,
-                    pvLines = emptyList(),
-                    bestMoves = emptyList(),
-                )
-            }
-            send("YXNBEST $nbest")
         }
+
+    /** 发盘面与分析命令（YXBOARD + YXNBEST），调用方保证后续等待逻辑 */
+    private fun sendBoardCommands(moves: List<Board.Move>, nbest: Int, timeMs: Int) {
+        // 注意：分析模式必须 TIMEOUT_TURN=0，否则到达时限后引擎会自行结束并吐坐标，
+        // 且退出分析模式；timeMs>0 仅用于“提示/扫描”这种一次性场景
+        send("INFO TIMEOUT_TURN $timeMs")
+        // 关键：棋力档位会限制深度并在候选中随机挑点，会污染分析结论，分析前必须恢复满强度
+        sendStrength(FULL_STRENGTH)
+        prepareSearch(EngineStatus.Phase.ANALYZING)
+        sendBoard(moves)
+        // YXBOARD 不触发思考；开始 N 路分析
+        send("YXNBEST $nbest")
+    }
+
+    /** 只发盘面（YXBOARD），不改阶段、不改时限、不触发搜索 */
+    private fun sendBoard(moves: List<Board.Move>) {
+        send("YXBOARD")
+        // 引擎模型里首手固定为黑，白先局面先用一个 PASS 换手
+        if (moves.isNotEmpty() && moves.first().color != Board.Color.BLACK) {
+            send(PASS_ENTRY)
+        }
+        for (m in moves) {
+            send("${m.x},${m.y},${if (m.color == Board.Color.BLACK) 1 else 2}")
+        }
+        send("DONE")
+    }
+
+    private fun sendStrength(level: Int) {
+        send("INFO STRENGTH ${level.coerceIn(0, MAX_STRENGTH)}")
     }
 
     /** 停止当前搜索；引擎会输出最终最佳着法 */
@@ -204,31 +260,55 @@ class RapfiEngine(private val context: Context) {
         scope.launch(writeDispatcher) { send("STOP") }
     }
 
-    /** 停止搜索并等待引擎回到空闲。改局面/重新分析前调用，避免与在途搜索竞争协议状态。 */
-    suspend fun stopAndAwait(timeoutMs: Long = 4000) {
-        if (_status.value.phase == EngineStatus.Phase.IDLE) return
-        withContext(writeDispatcher) { send("STOP") }
-        withTimeoutOrNull(timeoutMs) {
-            _status.first { it.phase == EngineStatus.Phase.IDLE }
-        }
+    /**
+     * 只同步盘面，不触发搜索（YXBOARD 后不发 YXNBEST）。
+     * 对局中做过全谱扫描/复盘后，引擎内部盘面停在扫描的最后一手，
+     * 必须同步回实战局面，否则下一次 TURN 会被引擎按错误局面应着。
+     * 调用前需确保引擎空闲（思考中 YXBOARD 会被丢弃）。
+     */
+    suspend fun syncBoard(moves: List<Board.Move>): Result<Unit> = withContext(writeDispatcher) {
+        runCatching { sendBoard(moves) }
     }
 
-    /** 查询连珠规则下当前禁手点 */
-    suspend fun queryForbid(): Result<Set<Pt>> = withContext(writeDispatcher) {
-        runCatching {
-            val def = CompletableDeferred<Set<Pt>>()
-            awaitingForbid = def
-            send("YXSHOWFORBID")
-            def.await()
+    /**
+     * 停止搜索并等待引擎回到空闲。改局面/重新分析前调用，避免与在途搜索竞争协议状态。
+     * @return 是否已确认回到空闲；false 表示超时（此时发命令会被引擎丢弃）
+     */
+    suspend fun stopAndAwait(timeoutMs: Long = 4000): Boolean {
+        if (_status.value.phase == EngineStatus.Phase.IDLE) return true
+        withContext(writeDispatcher) { send("STOP") }
+        val idle = withTimeoutOrNull(timeoutMs) {
+            _status.first { it.phase == EngineStatus.Phase.IDLE }
         }
+        if (idle == null) Log.w(TAG, "stopAndAwait timed out")
+        return idle != null
     }
 
     // --------------------------------------------------------- 内部
 
-    private suspend fun awaitMoves(): List<Pt> {
+    /** 标记一次搜索开始：清空上一次的 PV/推荐点，并把阶段置为搜索中。 */
+    private fun prepareSearch(phase: EngineStatus.Phase) {
+        curPv = null
+        pvAccumulator = linkedMapOf()
+        _status.update {
+            it.copy(phase = phase, pvLines = emptyList(), bestMoves = emptyList())
+        }
+    }
+
+    /** 装好挂起点后执行 [action]，等待引擎输出最终着法行。 */
+    private suspend fun requestMoves(action: () -> Unit): List<Pt> {
         val def = CompletableDeferred<List<Pt>>()
         awaitingMoves = def
-        return def.await()
+        return try {
+            action()
+            def.await()
+        } catch (t: Throwable) {
+            // 超时/取消：让引擎停下来，否则 THINKING 相位会一直留在原地锁死输入
+            runCatching { send("STOP") }
+            throw t
+        } finally {
+            if (awaitingMoves === def) awaitingMoves = null
+        }
     }
 
     private fun send(cmd: String) {
@@ -249,16 +329,6 @@ class RapfiEngine(private val context: Context) {
             _status.update { it.copy(phase = EngineStatus.Phase.IDLE, bestMoves = moves) }
             awaitingMoves?.complete(moves)
             awaitingMoves = null
-            return
-        }
-
-        // FORBID 0102 0304.
-        if (line.startsWith("FORBID")) {
-            val pts = HashSet<Pt>()
-            val m = FORBID_POINT.matcher(line)
-            while (m.find()) pts.add(m.group(1)!!.toInt() to m.group(2)!!.toInt())
-            awaitingForbid?.complete(pts)
-            awaitingForbid = null
             return
         }
 
@@ -298,6 +368,8 @@ class RapfiEngine(private val context: Context) {
             }
             "DEPTH" -> curPv = curPv?.let { it.copy(depth = value.toIntOrNull() ?: it.depth) }
                 ?: PvLine(depth = value.toIntOrNull() ?: 0)
+            "SELDEPTH" -> curPv = curPv?.let { it.copy(selDepth = value.toIntOrNull() ?: it.selDepth) }
+            "NUMPV" -> curPv = curPv?.let { it.copy(numPv = value.toIntOrNull() ?: it.numPv) }
             "NODES" -> curPv = curPv?.let { it.copy(nodes = value.toLongOrNull() ?: it.nodes) }
             "TOTALNODES" -> curPv = curPv?.let { it.copy(totalNodes = value.toLongOrNull() ?: it.totalNodes) }
             "TOTALTIME" -> curPv = curPv?.let { it.copy(timeMs = value.toLongOrNull() ?: it.timeMs) }

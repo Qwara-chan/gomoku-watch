@@ -7,7 +7,10 @@ typealias Pt = Pair<Int, Int>
 data class PvLine(
     val index: Int = 0,
     val depth: Int = 0,
+    /** 选择性深度（SELDEPTH），通常大于 depth */
     val selDepth: Int = 0,
+    /** 本次搜索的路数（NUMPV） */
+    val numPv: Int = 0,
     val nodes: Long = 0,
     val totalNodes: Long = 0,
     val timeMs: Long = 0,
@@ -23,13 +26,8 @@ data class EngineStatus(
     /** 搜索结束后的最佳着法（可能多行：YXNBEST） */
     val bestMoves: List<Pt> = emptyList(),
     val pvLines: List<PvLine> = emptyList(),
-    /** 连珠规则下黑棋禁手点（由 YXSHOWFORBID 返回） */
-    val forbidPoints: Set<Pt> = emptySet(),
-    val engineInfo: String = "",
 ) {
     enum class Phase { IDLE, THINKING, ANALYZING }
-
-    val primaryPv: PvLine? get() = pvLines.firstOrNull()
 }
 
 /** 将杀分换算：eval >= 29500 表示将杀，数值 = 30000 - 距杀步数( ply ) */
@@ -46,4 +44,11 @@ object EngineValue {
         val moves = (ply + 1) / 2
         return if (eval > 0) "M$moves" else "-M$moves"
     }
+
+    /**
+     * 引擎的 WINRATE 是“行棋方胜率”；评估曲线统一按黑方胜率存储。
+     * @param ply 该局面已落子数（偶数时黑方行棋）
+     */
+    fun blackWinRate(winRate: Float, ply: Int): Float =
+        if (ply % 2 == 0) winRate else 1f - winRate
 }

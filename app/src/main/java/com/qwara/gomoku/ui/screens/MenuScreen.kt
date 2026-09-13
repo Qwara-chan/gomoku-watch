@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -25,18 +26,26 @@ import androidx.wear.compose.material3.FilledTonalButton
 import androidx.wear.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qwara.gomoku.MainViewModel
 import com.qwara.gomoku.R
 import com.qwara.gomoku.game.Board
+import com.qwara.gomoku.ui.components.ChoiceButton
 import com.qwara.gomoku.ui.components.WideButton
 import com.qwara.gomoku.ui.theme.WoodAmber
 
 @Composable
 fun MenuScreen(vm: MainViewModel) {
     var showColorDialog by remember { mutableStateOf(false) }
+    // 弹窗里选中的执子：勾按它开局，叉取消
+    var chosenColor by remember { mutableStateOf(Board.Color.BLACK) }
+    val state by vm.ui.collectAsStateWithLifecycle()
+    // 内存里还留着没下完的棋：给一个明确的"回去接着下"入口
+    val resumable = state.moves.isNotEmpty() && state.gameOver == null
 
     ScalingLazyColumn(
         modifier = Modifier
@@ -54,6 +63,16 @@ fun MenuScreen(vm: MainViewModel) {
                     .fillMaxWidth()
                     .padding(top = 12.dp, bottom = 8.dp),
             )
+        }
+        if (resumable) {
+            item {
+                WideButton(
+                    text = stringResource(R.string.menu_resume),
+                    subtitle = stringResource(R.string.menu_resume_sub, state.moves.size),
+                    icon = Icons.Default.PlayArrow,
+                    onClick = vm::resumeGame,
+                )
+            }
         }
         item {
             WideButton(
@@ -97,32 +116,33 @@ fun MenuScreen(vm: MainViewModel) {
             onDismissRequest = { showColorDialog = false },
             title = { Text(stringResource(R.string.menu_choose_color_title)) },
             confirmButton = {
-                AlertDialogDefaults.ConfirmButton(onClick = { showColorDialog = false })
+                // 勾 = 用选中的执子开始人机对战
+                AlertDialogDefaults.ConfirmButton(onClick = {
+                    showColorDialog = false
+                    vm.newAiGame(chosenColor)
+                })
+            },
+            dismissButton = {
+                // 叉 = 取消（不开局）
+                AlertDialogDefaults.DismissButton(onClick = { showColorDialog = false })
             },
             content = {
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        FilledTonalButton(
-                            onClick = {
-                                showColorDialog = false
-                                vm.newAiGame(Board.Color.BLACK)
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.play_as_black))
-                        }
-                        FilledTonalButton(
-                            onClick = {
-                                showColorDialog = false
-                                vm.newAiGame(Board.Color.WHITE)
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.play_as_white))
-                        }
+                        ChoiceButton(
+                            text = stringResource(R.string.play_as_black),
+                            selected = chosenColor == Board.Color.BLACK,
+                            onClick = { chosenColor = Board.Color.BLACK },
+                        )
+                        ChoiceButton(
+                            text = stringResource(R.string.play_as_white),
+                            selected = chosenColor == Board.Color.WHITE,
+                            onClick = { chosenColor = Board.Color.WHITE },
+                        )
                     }
                 }
             },

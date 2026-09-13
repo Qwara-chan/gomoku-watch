@@ -1,0 +1,76 @@
+# AGENTS.md
+
+Wear OS round-screen Gomoku app (renju/freestyle), single module `:app`, pure Kotlin + Jetpack Compose for Wear, no GMS deps. Screen logic lives in `MainViewModel.kt`; one Activity (`MainActivity.kt`) with Compose screens under `ui/`. The `game/` package is pure Kotlin with no Android imports.
+
+## Commands
+
+```bash
+./gradlew :app:testDebugUnitTest  # the only verification; 30 tests in GameLogicTest.kt + BoardViewportTest.kt
+./gradlew :app:assembleDebug
+./gradlew :app:assembleRelease    # R8 minify on; signed only if keystore props exist
+```
+
+CI: `.github/workflows/build.yml` (unit tests + debug/release APKs as artifacts, GitHub Release on `v*` tags, optional signing via the `KEYSTORE_*` secrets). It builds with JDK 21 and `platforms;android-37.0` — note the new-style SDK versioning: `compileSdk = 37` resolves to the `platforms;android-37.0` package, not `platforms;android-37`. Without keystore props AGP emits `app-release-unsigned.apk`, so any script copying the release APK must glob `app-release*.apk`.
+
+No lint/formatting/ktlint task is configured. Requires JDK 17+ and Android SDK (compileSdk 37); SDK path comes from `local.properties` (`sdk.dir`) or `ANDROID_HOME`, else Gradle fails with "SDK location not found". Debug builds get `applicationIdSuffix = ".debug"`.
+
+## Engine integration (read before touching `engine/`)
+
+The app drives the Rapfi engine (v0.43.02, GPLv3) in-process via JNI (`librapfi.so` in `jniLibs/`, prebuilt for arm64-v8a/armeabi-v7a/x86_64) over the Piskvork/Yixin wire protocol, parsed in `RapfiEngine.kt`. Protocol is coupled to engine behavior; high-signal invariants:
+
+- `INFO SHOW_DETAIL 2` must be sent after START — default `infoMode=0` emits no `INFO` lines at all.
+- While thinking, the engine drops every command except `STOP`/`END`. Always call `stopAndAwait()` (and handle its timeout) before changing position, or commands get silently discarded.
+- Analysis mode must set `TIMEOUT_TURN 0` (infinite); a nonzero limit makes the engine stop itself, emit a move line, and exit analysis.
+- `INFO STRENGTH 0-100` is a per-search option (100 = full strength, default). Below 100 the engine caps depth (`SkillMovePicker.pickDepth()`: level 0/30/60/85 → depth 4/8/12/14, verified on the host harness), raises multiPV and finally swaps the best line with a randomly picked suboptimal move — so it must be re-sent before every AI `TURN`/`BEGIN`, and `sendBoardCommands` resets it to `FULL_STRENGTH` before every `YXBOARD`/`YXNBEST` or analysis/hint results become randomized. `scanAnalyze` (full-game eval curve) relies on the same reset.
+- A `YXNBEST` search is *not* the engine's analysis mode: `isAnalysisMode()` is `!timeLimit`, and the session boot sets `TIMEOUT_MATCH`, so `timeLimit` is always true. Consequence: once the engine proves a mate it stops by itself (~24 depth iterations later) and prints the final move line. The UI treats that as a normal IDLE + best move; `stopAndAwait()` then returns immediately and no second move line arrives.
+- An empty board is answered from the engine's opening book: the move line arrives with no `INFO PV`/`WINRATE` block at all. `MainViewModel.startFullScan()` therefore starts at ply 1 — there is no eval to record for ply 0.
+- `scanAnalyze(moves, timeMs)` is the only analysis call that waits for the engine to go IDLE (finite `TIMEOUT_TURN` makes the engine end the search itself); `syncAndAnalyze` is fire-and-forget and must be paired with `stopAndAwait`/`stop`.
+- `syncBoard(moves)` sends `YXBOARD` only (no `YXNBEST`), so the engine sets its position and stays idle. `startFullScan` deliberately rewrites the engine's internal board ply by ply, so its `finally` must put the position back: it re-syncs via `syncBoard` whenever the mode is `AI` (otherwise the next `TURN` is answered for the wrong position) and restarts the live analysis in analysis mode. That `finally`'s engine calls must stay wrapped in `withContext(NonCancellable)` — when the scan job was cancelled (background pause, user abort), bare suspend calls throw CancellationException at entry and the position restore silently never happens.
+- Engine-busy UI state is recomputed in both `withAiMoveInFlight` and the scan `finally` (`engineThinking = engineThinkingNow()`): the status flow can observe IDLE *before* the flag is cleared, and without the recompute the UI sticks on "engine thinking" with grayed-out buttons.
+- The status collector in `MainViewModel` throttles mid-search `THINKING`/`ANALYZING` pushes to `PV_PUSH_INTERVAL` (120 ms) — otherwise each PV DONE becomes a full `GameUiState` copy plus a whole-screen recomposition/board redraw, dozens of times a second. Phase changes (incl. IDLE, which drives the hint and the input lock) always push immediately, and curve recording is merged into that same `_ui.update` — don't reintroduce a second full-state copy per PV.
+- Lifecycle pause/resume: `MainActivity` wires Activity `onStop`/`onStart` to `MainViewModel.onHostStopped()`/`onHostStarted()`. `onHostStopped` cancels the full scan (auto-rescanned on return) and stops infinite analysis via `stopAndAwait` (flagged `resumeAnalysisOnStart`, resumed only back on the analysis screen); without this the engine's native search threads burn CPU in the background forever. The `backgrounded` flag guards `restartAnalysisIfActive()` — the scan's `finally` runs after `cancelFullScan()` and would otherwise restart analysis in the background. Bounded searches (AI reply under `TIMEOUT_TURN`, the 2 s hint) are deliberately left alone.
+- To sync a white-first position, prefix the move list with the pass entry `-1,-1,1` — the engine model always assumes Black plays first.
+- Engine eval uses mate notation `+M43`/`-M5`; `EngineValue.MATE = 30000`, values ≥ 29500 (by 100-ply interval) mean mate. `INFO WINRATE` is the side-to-move win rate (0..1, clamped at mates); `EngineValue.blackWinRate(winRate, ply)` normalizes it for the eval curve.
+- Coordinate convention everywhere (engine and UI): `x` = column, `y` = row, 0-indexed.
+
+Rebuilding the engine is covered in `Rapfi-src/Rapfi/jni/README.md` (CMake with `-DBUILD_JNI=ON -DNO_COMMAND_MODULES=ON`, NDK; copy to `jniLibs/<abi>/`; use `llvm-strip --strip-debug`, never `--strip-all` — it drops the JNI symbols `RapfiNative` binds to by name). `Rapfi-src/` is a separate git clone and gitignored, not part of this repo. Smoke-test native changes with the host-JVM harness in `Rapfi-src/Rapfi/jni/host/` (`AppFlowTest` replays the app flow; `ScanProtocolTest` replays the full-game scan + `INFO STRENGTH` sequences and asserts the depth caps). Host build note: `JNI_INCLUDE_DIR` must point at a directory holding both `jni.h` and `jni_md.h` (symlink them from `$JAVA_HOME/include` and `include/linux`).
+
+The committed arm64-v8a `librapfi.so` is rebuilt with PGO + ThinLTO (`-fvisibility=hidden -fno-semantic-interposition`, `-Wl,--lto-O3`; 2.49 MB vs 2.70 MB stock, bit-identical evals). PGO recipe: instrumented host build (`-fprofile-instr-generate` on C/C/shared-linker flags) → run `SmokeTest`/`AppFlowTest`/`ScanProtocolTest`/`EdgeTest` with `LLVM_PROFILE_FILE=/tmp/rapfi-prof-%p.profraw` and the repo's `app/src/main/assets/engine/common` as workDir → merge with the NDK's `llvm-profdata` (version-matches the target compiler) → arm64 build with `-fprofile-instr-use` on C/CXX/shared-linker flags. Measured on OWW251: nps unchanged (the engine is already hand-vectorized -O3); `USE_NEON_DOTPROD=ON` builds exist in `Rapfi-src/Rapfi/build/jni-arm64-dp` but stay OFF — dotprod requires armv8.2+ and would SIGILL on older arm64 watches (Wear 4100 class) if the release APK is distributed.
+
+## Engine assets
+
+NNUE weights + `config.toml` live in `app/src/main/assets/engine/common/`. `EngineInstaller` extracts them once to `filesDir/engine`, gated by stamp `weights-v1.stamp` — if you change or rename any model file, bump `STAMP` (or old APKs won't refresh) and keep it listed in `REQUIRED_FILES`: the completeness check must cover every file including the three ~10 MB `.bin.lz4` weights, otherwise a half-failed extraction gets locked in by the stamp and the engine can never start. `.bin` files are already excluded from compression via `noCompress += listOf("bin")` in `app/build.gradle.kts`. Rapfi requires its weight/config files to be findable in the `workDir` it is started with.
+
+## Renju rules
+
+Forbidden (black only) checks are implemented locally in `RenjuRules`, not via the engine's `YXSHOWFORBID`: "four" = one move makes exactly five (jump shapes included), "live three" = one move makes a live four, overline excluded from fours. Known boundary: if a three's only live-four completion point is itself a black forbidden point, this implementation still counts it as a live three (the engine recursively excludes such pseudo-threes); rare, and documented in README if full alignment is ever needed. `RenjuRules.check` requires the target cell empty and Black to move; a move forming exactly five is never forbidden (F5 priority matches the engine). Add forbidden-case tests to `GameLogicTest.kt`.
+
+## Board rendering and review mode
+
+`Board.winLine(x, y, color, rule)` is the single win/line authority (`checkWin` delegates to it); it returns the full run sorted by x then y, `null` for no win, and `null` for a black overline under renju — an exact five in another direction still wins (F5 priority). `MainViewModel` stores it in `GameUiState.winLine` for the winning-line overlay.
+
+Review mode: `GameUiState.viewPly` non-null means the board shows the position after that many moves. `refresh()` derives a read-only grid via `gridAt(moves, viewPly)` and `visibleMoves` bounds the move numbers/last-move ring; every position-changing entry point (tap/undo/redo/hint/apply/best-move) is locked out while reviewing — keep it that way, since the engine still analyzes the real position. A board tap and closing the curve panel both clear `viewPly` (otherwise the board looks frozen with no visible way out). The engine must not be re-synced on scrub: only `setViewPly(null)` restores the live position.
+
+`EvalCurvePanel` is used from both `AnalysisScreen` (toggled by tapping the eval capsule) and `GameScreen` (in-game menu item, so the curve is reachable without leaving a game); its background consumes taps so a stray tap never places a stone through the open panel.
+
+The hint ring pulse is a finite `Animatable` (`rememberHintPulseState`): two breathing cycles after the hint appears, then it holds at full alpha; when there is no hint it produces no frames at all. Do not replace it with `rememberInfiniteTransition` — that keeps the frame clock ticking the whole time the board is composed (game and analysis screens alike), so on a watch the CPU never idles between interactions.
+
+## Round-screen board geometry
+
+`BoardViewport` holds the pure view math (`MIN_SCALE` 0.66 = the whole 15x15 board fits inside the round screen, `MAX_SCALE` 3, `DEFAULT_SCALE` 1 = board filling the screen) and is unit-tested in `BoardViewportTest` for the invariant that matters on a round display: at every scale in range, any intersection — including the four corner points — can be panned to the screen centre.
+
+Why it exists: with the old clamp (`side*(scale-1)/2`) the corner intersections could only ever be pushed to the corner of the square canvas, which is exactly where the round screen is clipped, and at the default scale the pan was locked to zero — so corner points were impossible to see or tap. `clampPan` now limits pan to `BoardViewport.panLimit` (the board-centre-to-corner distance times the scale), and the canvas is pre-filled with dark wood so panning off the board shows a table instead of the black background. Keep `BoardViewport` free of Compose types so the tests stay JVM-only.
+
+## Rotary (crown) input
+
+The board zooms from the crown through three paths, all in `GomokuBoard`; keep them consistent when touching zoom code:
+
+1. **Standard rotary watches** — the crown is `SOURCE_ROTARY_ENCODER`, handled by `Modifier.onRotaryScrollEvent`. This needs the board node to hold focus: use `Modifier.requestFocusOnHierarchyActive()` (the deprecated `rememberActiveFocusRequester()` shares one FocusRequester with an invisible Box, so focus could land on that sibling instead of the board).
+2. **Crown reported as a mouse wheel** — OPPO OWW251 exposes `oplus_crown` as `Sources: 0x00002002` = `SOURCE_MOUSE` with `REL_WHEEL`, so Compose's rotary modifier (ROTARY_ENCODER only) never fires. Compose maps such wheels to a **pointer `Scroll` event**, handled by the board's dedicated `pointerInput` block (`event.type == PointerEventType.Scroll`, `change.scrollDelta.y`).
+3. **Fallback for wheels Compose does not consume** — `View.setOnGenericMotionListener` (on `LocalView`, i.e. the AndroidComposeView) reads `AXIS_SCROLL`/`AXIS_VSCROLL`. It returns false for `SOURCE_ROTARY_ENCODER` and for zero-axis events, and the pointer path consumes what it handles, so exactly one path applies per event and the zoom is never doubled.
+
+`WHEEL_STEP` converts a scroll event into the same step size the rotary path uses. Measured on OPPO OWW251: turning the crown produces ~25 Scroll events per second with `scrollDelta` 1–12 each, so the per-unit factor must stay small (0.09, plus a ±8 per-event cap) — a large factor makes the zoom jump straight to min/max and feel broken rather than fast. Frame cost also matters on this class of device: `StoneStyle` caches the per-stone gradient shaders (previously one Skia `Shader` per stone per frame) and `animateZoomTo` is driven by `withFrameNanos` (a `yield()` busy loop starved the main thread: 5 frames per 250 ms, 350 ms each). On-device diagnosis: this ROM drops `Log.d`/`Log.v` from the app, so `GomokuBoard`'s install/focus diagnostics use `Log.i` while the per-event lines stay at `Log.d`; flip them temporarily to `Log.i` when you need the crown event data. `adb shell input roll` / `sendevent` cannot reproduce a wheel here (injection is dropped, and /dev/input is not writable by shell), so crown behaviour must be verified by hand on the watch.
+
+## Navigation and the in-memory game
+
+The board is never cleared by navigation — only `startGame`/`clearBoard`/`flipColors` touch it — so a game stays resumable until a new game is started. `analysisOrigin` (where analysis was entered from) plus `gameMode` (the mode of the current game, set in `startGame`) drive `backFromAnalysis()`: it returns to the game whenever the analysis came from the game *or* `canResumeGame()` (moves on the board and no game over), and only falls back to `toMenu()` for an empty board. `resumeGame()` is the same restore path and is wired to the main menu's 继续对局 entry. Do not make the analysis exit unconditionally call `toMenu()` — that silently strands the user's game.

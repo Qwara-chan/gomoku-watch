@@ -2,6 +2,7 @@ package com.qwara.gomoku.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,9 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.wear.compose.material3.Text
+import com.qwara.gomoku.GameUiState
 import com.qwara.gomoku.MainViewModel
 import com.qwara.gomoku.R
 import com.qwara.gomoku.engine.EngineStatus
@@ -44,16 +49,20 @@ import com.qwara.gomoku.ui.board.GomokuBoard
 import com.qwara.gomoku.ui.components.BottomArcButtons
 import com.qwara.gomoku.ui.components.CircleIconButton
 import com.qwara.gomoku.ui.components.EdgeCapsule
+import com.qwara.gomoku.ui.components.EvalCurvePanel
 import com.qwara.gomoku.ui.theme.CreamWhite
 import com.qwara.gomoku.ui.theme.DeepBlack
 import com.qwara.gomoku.ui.theme.HintGreen
 import com.qwara.gomoku.ui.theme.PanelDark
 import com.qwara.gomoku.ui.theme.WoodAmber
+import java.util.Locale
 
 @Composable
 fun AnalysisScreen(vm: MainViewModel) {
     val state by vm.ui.collectAsStateWithLifecycle()
     val primary = state.pvLines.firstOrNull()
+    // 曲线面板：点顶部评估胶囊展开/收起
+    var curveOpen by remember { mutableStateOf(false) }
 
     // 分析期间保持屏幕常亮
     val screenView = LocalView.current
@@ -62,7 +71,8 @@ fun AnalysisScreen(vm: MainViewModel) {
         onDispose { screenView.keepScreenOn = false }
     }
 
-    BackHandler { vm.toMenu() }
+    // 从对局进来的话，返回键回对局（局面保留），否则回主菜单
+    BackHandler { vm.backFromAnalysis() }
 
     Box(
         modifier = Modifier
@@ -75,7 +85,7 @@ fun AnalysisScreen(vm: MainViewModel) {
             modifier = Modifier.fillMaxSize(),
         )
 
-        // 顶部：返回钮 + 胜率胶囊（整体居中，下移避开圆屏弧顶）
+        // 顶部：返回钮 + 胜率胶囊（整体居中，下移避开圆屏弧顶）；点胶囊展开评估曲线
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -88,12 +98,12 @@ fun AnalysisScreen(vm: MainViewModel) {
             ) {
                 CircleIconButton(
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
-                    onClick = vm::toMenu,
+                    onClick = vm::backFromAnalysis,
                     size = 28.dp,
                 )
                 Spacer(Modifier.width(4.dp))
-                EdgeCapsule {
-                    MiniEvalContent(primary)
+                EdgeCapsule(modifier = Modifier.clickable { curveOpen = !curveOpen }) {
+                    MiniEvalContent(state, primary)
                 }
             }
             if (state.moves.isEmpty()) {
@@ -109,15 +119,49 @@ fun AnalysisScreen(vm: MainViewModel) {
             }
         }
 
-        // 底部中间空隙：深度/nps + PV 胶囊（抬高避开两侧弧线按钮）
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 84.dp),
-        ) {
-            EdgeCapsule {
-                DetailCapsuleContent(primary)
+        // 底部中间空隙：深度/节点/nps/用时 + 主变例胶囊（下压到弧线按钮上方，少挡棋盘中路）
+        if (!curveOpen) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 72.dp),
+            ) {
+                EdgeCapsule(alpha = 0.55f) {
+                    // 复盘浏览时实时变例属于“当前局面”，与屏幕上的历史局面不符：改显示历史评估
+                    DetailCapsuleContent(primary, reviewReadout(state.viewPly, state.curve))
+                }
             }
+        } else {
+            EvalCurvePanel(
+                curve = state.curve,
+                maxPly = state.moves.size,
+                markerPly = state.viewPly ?: state.moves.size,
+                progress = state.scan?.let { it.done to it.total },
+                // 候选点只对“当前局面”有意义：复盘浏览/扫描期间不显示
+                candidates = if (state.viewPly == null && state.scan == null) {
+                    candidateRows(state.pvLines, state.analysisLines, state.showCandidates)
+                } else {
+                    emptyList()
+                },
+                onScrub = { ply ->
+                    // 扫描期间棋盘由扫描任务驱动，忽略拖动
+                    if (state.scan == null) {
+                        // 拖到最右端即回到当前局面
+                        vm.setViewPly(if (ply >= state.moves.size) null else ply)
+                    }
+                },
+                onScan = vm::startFullScan,
+                onCancelScan = vm::cancelFullScan,
+                onBackToCurrent = { vm.setViewPly(null) },
+                onClose = {
+                    curveOpen = false
+                    // 收起面板必须同时退出复盘，否则画面停在历史局面且没有出口
+                    vm.setViewPly(null)
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 78.dp, start = 10.dp, end = 10.dp),
+            )
         }
 
         // 底部弧线按钮（贴合圆屏边缘）
@@ -160,12 +204,18 @@ fun AnalysisScreen(vm: MainViewModel) {
     }
 }
 
-/** 顶部窄胶囊：胜率条 + 胜率值/将杀。宽度克制，适配圆屏顶部弧边。 */
+/**
+ * 顶部窄胶囊：胜率条 + 胜率值/将杀 + 最佳着法坐标。
+ * 复盘浏览时改用曲线上记录的历史胜率，避免显示当前局面的实时评估。
+ */
 @Composable
-private fun MiniEvalContent(pv: PvLine?) {
-    val winRate = pv?.winRate ?: Float.NaN
-    val mate = pv?.let { EngineValue.mateText(it.eval) }
+private fun MiniEvalContent(state: GameUiState, pv: PvLine?) {
+    val ply = state.viewPly
+    val reviewing = ply != null
+    val winRate = if (ply != null) (state.curve[ply] ?: Float.NaN) else (pv?.winRate ?: Float.NaN)
+    val mate = if (reviewing) null else pv?.let { EngineValue.mateText(it.eval) }
     val fraction = if (winRate.isNaN()) 0f else winRate.coerceIn(0f, 1f)
+    val best = if (reviewing) null else pv?.moves?.firstOrNull()
     val label = when {
         mate != null -> mate
         winRate.isNaN() -> "—"
@@ -192,22 +242,58 @@ private fun MiniEvalContent(pv: PvLine?) {
         )
     }
     Spacer(Modifier.width(5.dp))
-    Text(text = label, color = WoodAmber, fontSize = 11.sp, maxLines = 1, softWrap = false)
-}
-
-/** 底部胶囊：深度 · nps · 主变例（单行截断）。 */
-@Composable
-private fun DetailCapsuleContent(pv: PvLine?) {
     Text(
-        text = "D${pv?.depth ?: 0} · " +
-            stringResource(R.string.analysis_nps, formatCount(pv?.speed ?: 0)) +
-            " · " + pvText(pv),
-        color = CreamWhite.copy(alpha = 0.85f),
-        fontSize = 10.sp,
+        text = if (best == null) label else "$label ${coord(best.first, best.second)}",
+        color = WoodAmber,
+        fontSize = 11.sp,
         maxLines = 1,
         softWrap = false,
-        overflow = TextOverflow.Ellipsis,
     )
+}
+
+/** 底部胶囊：深度/选择深度 · 节点 · nps · 用时（两行：数据 + 主变例）。 */
+@Composable
+private fun DetailCapsuleContent(pv: PvLine?, reviewReadout: String?) {
+    Column {
+        Text(
+            text = reviewReadout ?: detailText(pv),
+            color = CreamWhite.copy(alpha = 0.85f),
+            fontSize = 10.sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (reviewReadout == null) {
+            Text(
+                text = pvText(pv),
+                color = CreamWhite.copy(alpha = 0.7f),
+                fontSize = 10.sp,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** 复盘浏览时顶部/底部胶囊使用的历史评估文案 */
+@Composable
+private fun reviewReadout(ply: Int?, curve: Map<Int, Float>): String? {
+    if (ply == null) return null
+    val value = curve[ply]
+    return if (value == null || value.isNaN()) {
+        stringResource(R.string.curve_no_value, ply)
+    } else {
+        stringResource(R.string.curve_readout, ply, (value * 100).toInt())
+    }
+}
+
+/** 思考细节：深度（含选择深度）、节点、nps、用时 */
+private fun detailText(pv: PvLine?): String {
+    if (pv == null) return "—"
+    val depth = if (pv.selDepth > pv.depth) "D${pv.depth}/${pv.selDepth}" else "D${pv.depth}"
+    val seconds = String.format(Locale.ROOT, "%.1fs", pv.timeMs / 1000.0)
+    return "$depth · ${formatCount(pv.nodes)} · ${formatCount(pv.speed)} nps · $seconds"
 }
 
 private fun pvText(pv: PvLine?): String {
@@ -219,9 +305,20 @@ private fun pvText(pv: PvLine?): String {
     }
 }
 
+/** 候选点文案（多点分析）："A H8 62%"，与棋盘上的字母徽章对应 */
+private fun candidateRows(pvLines: List<PvLine>, lines: Int, enabled: Boolean): List<String> {
+    if (!enabled) return emptyList()
+    return pvLines.take(lines).mapIndexedNotNull { i, pv ->
+        val pt = pv.moves.firstOrNull() ?: return@mapIndexedNotNull null
+        val pct = if (pv.winRate.isNaN()) "—" else "${(pv.winRate.coerceIn(0f, 1f) * 100).toInt()}%"
+        "${('A' + i)} ${coord(pt.first, pt.second)} $pct"
+    }
+}
+
+/** 节点数简写；固定用 ROOT/美国式小数点，避免某些语言下出现 "1,5k"。 */
 private fun formatCount(value: Long): String = when {
-    value >= 1_000_000 -> "${value / 100_000 / 10.0}M"
-    value >= 1_000 -> "${value / 100 / 10.0}k"
+    value >= 1_000_000 -> String.format(Locale.ROOT, "%.1fM", value / 1_000_000.0)
+    value >= 1_000 -> String.format(Locale.ROOT, "%.1fk", value / 1_000.0)
     else -> value.toString()
 }
 
