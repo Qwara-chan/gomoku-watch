@@ -65,6 +65,14 @@ android {
     androidResources {
         noCompress += listOf("bin")
     }
+    packaging {
+        jniLibs {
+            // librapfi.so 已按 AGENTS.md 配方用 llvm-strip --strip-debug 处理过；
+            // 禁止 AGP 用各机器版本不一的 strip 再削一层，保证 APK 内与提交字节一致
+            // （CI 的优化产物校验按字节数核对此文件）
+            keepDebugSymbols += "**/librapfi.so"
+        }
+    }
     sourceSets {
         getByName("main") {
             assets.srcDir("src/main/assets")
