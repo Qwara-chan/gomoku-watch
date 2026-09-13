@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 棋盘格线 -->
+    <path
+        android:strokeColor="#8D6E63"
+        android:strokeWidth="3"
+        android:pathData="M24,24 L84,24 M24,42 L84,42 M24,60 L84,60 M24,78 L84,78 M24,24 L24,84 M42,24 L42,84 M60,24 L60,84 M78,24 L78,84" />
+    <!-- 黑子 -->
+    <path
+        android:fillColor="#212121"
+        android:pathData="M60,60 m-9,0 a9,9 0 1,1 18,0 a9,9 0 1,1 -18,0" />
+    <!-- 白子 -->
+    <path
+        android:fillColor="#FAFAFA"
+        android:pathData="M42,42 m-9,0 a9,9 0 1,1 18,0 a9,9 0 1,1 -18,0" />
+</vector>

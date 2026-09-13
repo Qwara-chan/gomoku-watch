@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">五子棋</string>
+
+    <!-- 主菜单 -->
+    <string name="menu_two_player">双人对战</string>
+    <string name="menu_two_player_sub">同表对弈 · 可摆谱</string>
+    <string name="menu_ai">人机对战</string>
+    <string name="menu_ai_sub">挑战 Rapfi 引擎</string>
+    <string name="menu_analysis">局面分析</string>
+    <string name="menu_analysis_sub">Rapfi 引擎深度分析</string>
+    <string name="menu_settings">设置</string>
+
+    <!-- 通用 -->
+    <string name="action_back">返回</string>
+    <string name="action_undo">悔棋</string>
+    <string name="action_redo">重做</string>
+    <string name="action_hint">提示</string>
+    <string name="action_menu">菜单</string>
+    <string name="action_restart">重新开始</string>
+    <string name="action_flip">翻转棋盘</string>
+    <string name="action_clear">清空棋盘</string>
+    <string name="action_edit">编辑</string>
+    <string name="action_play">对弈</string>
+    <string name="action_apply_move">走这步</string>
+    <string name="action_start_search">开始分析</string>
+    <string name="action_stop_search">停止</string>
+
+    <!-- 对局状态 -->
+    <string name="status_black_turn">黑棋行棋</string>
+    <string name="status_white_turn">白棋行棋</string>
+    <string name="status_engine_thinking">引擎思考中…</string>
+    <string name="status_your_turn">轮到你走</string>
+    <string name="status_game_over_win">%1$s 获胜</string>
+    <string name="status_game_over_draw">平局</string>
+    <string name="status_forbidden_move">禁手！黑棋不能下这里</string>
+    <string name="status_occupied">该点已有棋子</string>
+
+    <!-- 设置 -->
+    <string name="settings_engine_time">引擎每步用时</string>
+    <string name="settings_engine_time_value">%1$d 秒</string>
+    <string name="settings_rule">规则</string>
+    <string name="settings_rule_freestyle">无禁手</string>
+    <string name="settings_rule_renju">有禁手</string>
+    <string name="settings_sound">落子音效</string>
+    <string name="settings_vibrate">震动反馈</string>
+    <string name="settings_engine">引擎信息</string>
+    <string name="settings_engine_loading">引擎加载中…</string>
+    <string name="settings_about">关于</string>
+
+    <!-- 分析 -->
+    <string name="analysis_depth">深度 %1$d</string>
+    <string name="analysis_nodes">%1$s 节点</string>
+    <string name="analysis_nps">%1$s nps</string>
+    <string name="analysis_eval">评估</string>
+    <string name="analysis_pv">主要变例</string>
+    <string name="analysis_best_move">最佳着法</string>
+
+    <!-- 选择先后手 -->
+    <string name="choose_color">选择执子</string>
+    <string name="play_as_black">执黑</string>
+    <string name="play_as_white">执白</string>
+
+    <!-- 确认 -->
+    <string name="confirm_leave_title">离开对局？</string>
+    <string name="confirm_leave_text">当前对局进度将丢失。</string>
+    <string name="confirm_yes">离开</string>
+    <string name="confirm_no">继续</string>
+    <string name="confirm_restart_title">重新开始？</string>
+    <string name="confirm_restart_text">将清空当前棋盘。</string>
+
+    <!-- 坐标 -->
+    <string name="coord_error">坐标</string>
+
+    <!-- 菜单补充 -->
+    <string name="menu_title">五子棋</string>
+    <string name="menu_choose_color_title">选择执子</string>
+
+    <!-- 对局补充 -->
+    <string name="status_move_count">第 %1$d 手</string>
+    <string name="status_move_count_short">%1$d 手</string>
+    <string name="status_edit_mode">编辑中·%1$s</string>
+    <string name="status_you_are">你执%1$s</string>
+    <string name="stone_black">黑</string>
+    <string name="stone_white">白</string>
+    <string name="game_over_black">黑棋获胜</string>
+    <string name="game_over_white">白棋获胜</string>
+    <string name="action_play_again">再来一局</string>
+    <string name="action_confirm_restart">确定</string>
+    <string name="confirm_clear_title">清空棋盘？</string>
+    <string name="confirm_clear_text">将移除全部棋子。</string>
+    <string name="dialog_edit_mode">编辑模式</string>
+    <string name="dialog_edit_color">编辑用子色</string>
+    <string name="dialog_analysis">局面分析</string>
+    <string name="dialog_back_to_menu">返回主菜单</string>
+    <string name="action_swap_sides">交换黑白</string>
+    <string name="analysis_empty_hint">点击棋盘落子分析</string>
+    <string name="analysis_flip">翻转黑白</string>
+    <string name="analysis_win_rate">胜率</string>
+    <string name="analysis_pv_moves">变例</string>
+
+    <!-- 设置补充 -->
+    <string name="settings_about_version">版本 %1$s</string>
+    <string name="settings_about_powered">Powered by Rapfi</string>
+    <string name="settings_decrease">减少</string>
+    <string name="settings_increase">增加</string>
+</resources>
