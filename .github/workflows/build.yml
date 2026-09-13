@@ -75,9 +75,11 @@ jobs:
           RELEASE_APK=$(ls app/build/outputs/apk/release/*universal*release*.apk)
           RULES=$(grep -c "qwara/gomoku" app/build/intermediates/combined_art_profile/release/compileReleaseArtProfile/baseline-prof.txt || true)
           LIB=$(unzip -l "$RELEASE_APK" | awk '/arm64-v8a\/librapfi.so/{print $1}')
-          echo "app profile rules=$RULES, arm64 librapfi.so bytes=$LIB"
+          LIB7=$(unzip -l "$RELEASE_APK" | awk '/armeabi-v7a\/librapfi.so/{print $1}')
+          echo "app profile rules=$RULES, arm64 librapfi.so bytes=$LIB, v7a bytes=$LIB7"
           test "${RULES:-0}" -ge 1000 || { echo "::error::release APK 的 baseline profile 缺少应用自有规则（预期 ≥1000）"; exit 1; }
           test "$LIB" = "2487912" || { echo "::error::arm64 librapfi.so 不是提交的 PGO+ThinLTO 优化版（预期 2487912 字节）"; exit 1; }
+          test "$LIB7" = "1853696" || { echo "::error::armeabi-v7a librapfi.so 不是提交的 NEON+PGO 优化版（预期 1853696 字节）"; exit 1; }
 
       - name: Collect APKs
         # release：universal 全量包 + 三个单 ABI 包；debug：只收 universal 包供真机调试
@@ -110,5 +112,5 @@ jobs:
           gh release delete ci --yes --cleanup-tag || true
           gh release create ci --prerelease \
             --title "CI 最新构建（main）" \
-            --notes "main 分支手动触发的最新自动构建。四个 APK 内容相同，按设备 ABI 任选其一安装（推荐 arm64-v8a），universal 为全量包。" \
+            --notes "main 分支手动触发的最新自动构建，每次手动运行整体替换。五种产物内核完全相同，按设备 ABI 任选其一：32 位手表（Wear 4100/Wear 2500 等大多数老表）选 armeabi-v7a，64 位手表选 arm64-v8a，不确定就选 universal 全量包；debug 包仅供真机调试。" \
             artifacts/*
