@@ -73,6 +73,16 @@ android {
             keepDebugSymbols += "**/librapfi.so"
         }
     }
+    // 按产物细分 ABI：arm64-v8a / armeabi-v7a / x86_64 各出一个独立 APK，
+    // 另出 universal 全量包。CI 会把四件套一起发布到 Release
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = true
+        }
+    }
     sourceSets {
         getByName("main") {
             assets.srcDir("src/main/assets")
