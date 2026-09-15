@@ -31,6 +31,10 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
+        with:
+          # 该 action 默认 packages 含旧的 tools 包，而 Google 自 2026-09-15 起不再提供它
+          # （sdkmanager tools 报 Failed to find package 'tools'）；只装 platform-tools
+          packages: 'platform-tools'
 
       - name: Install Android SDK components
         # 新版 SDK 版本号形如 37.0（Android 17）；包名若有变动，AGP 也会自动补装
