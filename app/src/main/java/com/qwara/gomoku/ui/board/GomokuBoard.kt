@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.requestFocusOnHierarchyActive
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import com.qwara.gomoku.GameMode
 import com.qwara.gomoku.GameUiState
 import com.qwara.gomoku.engine.EngineStatus
 import com.qwara.gomoku.game.Board
@@ -530,10 +531,11 @@ fun GomokuBoard(
                     }
                 }
 
-                // 多点分析：候选点 A/B/C 徽章（仅分析进行中；复盘浏览时不画）
-                if (state.showCandidates && state.viewPly == null &&
-                    state.enginePhase == EngineStatus.Phase.ANALYZING
-                ) {
+                // 多点分析：候选点 A/B/C 徽章。人机对战里引擎应着（THINKING）时同样画，
+                // 画面上就是它此刻的思考过程；复盘浏览时不画
+                val engineSearching = state.enginePhase == EngineStatus.Phase.ANALYZING ||
+                    (state.mode == GameMode.AI && state.enginePhase == EngineStatus.Phase.THINKING)
+                if (state.showCandidates && state.viewPly == null && engineSearching) {
                     state.pvLines.take(state.analysisLines).forEachIndexed { i, pv ->
                         val pt = pv.moves.firstOrNull() ?: return@forEachIndexed
                         val (gx, gy) = pt

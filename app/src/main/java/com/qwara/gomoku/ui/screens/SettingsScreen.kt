@@ -203,6 +203,15 @@ fun SettingsScreen(vm: MainViewModel) {
                 }
             }
         }
+        item {
+            Text(
+                text = stringResource(R.string.settings_lines_note),
+                color = CreamWhite.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+                fontSize = 10.sp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
 
         item {
             SettingLabel(stringResource(R.string.settings_display))

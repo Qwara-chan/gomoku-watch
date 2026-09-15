@@ -408,6 +408,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             showMessage("着法无效：$x,$y")
             return
         }
+        // 引擎应着走 YXBOARD + YXNBEST：要把刚落的这一手也摆进引擎盘面
         val result = board.place(x, y, color)
         redoStack.clear()
         feedback.playPlaceSound(s.sound)
@@ -419,7 +420,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         // AI 模式：用户落子后驱动引擎。先发起请求，使思考锁在本次刷新时即已生效
         val engineFollows = !fromEngine && s.mode == GameMode.AI && !result.win && !result.draw
-        if (engineFollows) requestEngineMove(x, y)
+        if (engineFollows) requestEngineMove(board.moves.toList())
         refresh()
         // 分析模式下局面已变：重开分析，否则显示的是旧局面的胜率/变例
         if (s.mode == GameMode.ANALYSIS) restartAnalysisIfActive()
@@ -443,19 +444,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun requestEngineMove(x: Int, y: Int) {
+    /**
+     * 驱动引擎应着。[position] 为含刚落下这一手的完整局面；路数取设置的“分析路数”，
+     * 对局中因此也能看到引擎的实时多路候选（路数越大同一时限下搜索越浅）。
+     */
+    private fun requestEngineMove(position: List<Board.Move>) {
         val s = _ui.value
         val timeMs = s.engineTimeSec * 1000
         val timeout = timeMs * 4L + 8000
         viewModelScope.launch {
             val mv = withAiMoveInFlight {
-                withTimeoutOrNull(timeout) { engine.playUserMove(x, y, timeMs, s.strength) }
+                withTimeoutOrNull(timeout) { engine.playUserMove(position, lines(), timeMs, s.strength) }
                     ?: Result.failure(RapfiEngine.EngineException("引擎超时"))
             }
             mv.onSuccess { (ex, ey) ->
                 val userColor = board.moves.lastOrNull()?.color ?: Board.Color.BLACK
                 placeStone(ex, ey, userColor.opponent, fromEngine = true)
             }.onFailure {
+                // 命令被引擎丢弃时它根本没开始搜索、不会有着法行来清相位：这里主动回落空闲，
+                // 否则 UI 会永远停在“引擎思考中”，棋盘与按钮全部锁死
+                engine.resetPhaseIfStuck()
                 showMessage("引擎出错：${it.message}")
             }
         }
@@ -571,7 +579,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             hintActive = true
-            engine.syncAndAnalyze(board.moves.toList(), 1, 2000)
+            // 提示也按“分析路数”要候选：盘上会画 A/B/C…，首选点仍由引擎的最终着法行决定（画成提示圈）
+            engine.syncAndAnalyze(board.moves.toList(), lines(), 2000)
         }
     }
 
@@ -676,8 +685,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     // 扫描把引擎盘面/时限改成了最后一手：仍在分析页时恢复实时分析
                     restartAnalysisIfActive()
                 } else if (mode == GameMode.AI) {
-                    // 对局中被扫描打断：引擎内部盘面停在扫描的某一手，同步回实战局面，
-                    // 否则下一次 TURN 会被引擎按错误局面应着。
+                    // 对局中被扫描打断：把引擎内部盘面同步回实战局面。应着现在每次都整盘重摆
+                    // （playUserMove 发完整 YXBOARD），所以这一步只是让引擎保持在对局局面上、
+                    // 顺手把可能还在跑的搜索停干净。
                     // 取消路径（后台/用户中断）时任务已取消，挂起调用必须包 NonCancellable
                     // 才能真正执行，否则 withContext 在入口就抛取消异常、引擎盘面留在扫描中途
                     withContext(NonCancellable) {
@@ -743,7 +753,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------- 内部
 
-    /** 引擎是否正在思考（TURN/BEGIN 搜索）：期间禁止一切落子/悔棋/改局操作 */
+    /** 引擎是否正在思考（应着 YXNBEST / 先行 BEGIN 搜索）：期间禁止一切落子/悔棋/改局操作 */
     private fun engineThinkingNow(): Boolean =
         aiMoveInFlight || engine.status.value.phase == EngineStatus.Phase.THINKING
 

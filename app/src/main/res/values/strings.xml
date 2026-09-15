@@ -32,6 +32,9 @@
     <string name="status_black_turn">黑棋行棋</string>
     <string name="status_white_turn">白棋行棋</string>
     <string name="status_engine_thinking">引擎思考中…</string>
+    <!-- 人机对战思考中读数：深度 · 行棋方（即引擎）胜率 · 首选点；杀棋时换成 M 数 -->
+    <string name="status_thinking_rate">深度 %1$d · 胜率 %2$s · 首选 %3$s</string>
+    <string name="status_thinking_mate">深度 %1$d · 杀 %2$s · 首选 %3$s</string>
     <string name="status_your_turn">轮到你走</string>
     <string name="status_game_over_win">%1$s 获胜</string>
     <string name="status_game_over_draw">平局</string>
@@ -58,6 +61,7 @@
     <string name="settings_strength_3">高级</string>
     <string name="settings_strength_4">最强</string>
     <string name="settings_lines">分析路数</string>
+    <string name="settings_lines_note">对局与提示也按此路数搜索；1 路时棋力最强</string>
     <string name="settings_display">显示</string>
     <string name="settings_display_numbers">手数序号</string>
     <string name="settings_display_forbidden">禁手标记</string>

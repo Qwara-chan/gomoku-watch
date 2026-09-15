@@ -14,3 +14,4 @@ captures/
 engine-bin/
 Rapfi-src/
 rapfi-networks/
+.zcode/

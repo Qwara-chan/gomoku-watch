@@ -26,7 +26,7 @@ import java.util.regex.Pattern
  * 用法：
  *  - [startNewGame] 启动/重置引擎会话并设定规则与每步时限；
  *  - [engineMoveFirst] 让引擎执黑先行（BEGIN）；
- *  - [playUserMove] 用户走子（TURN），挂起等待引擎应着；
+ *  - [playUserMove] 用户走子后让引擎应着（整盘 YXBOARD + YXNBEST），挂起等待引擎着法；
  *  - [takeback] 引擎内部局面回退一手（TAKEBACK）；
  *  - [syncAndAnalyze] 同步任意局面（YXBOARD）并开始 N 路分析（YXNBEST）；
  *  - [scanAnalyze] 限时分析单个局面并等待引擎回到空闲（全谱扫描逐手评估）；
@@ -52,6 +52,9 @@ class RapfiEngine(private val context: Context) {
 
         /** INFO STRENGTH 的取值范围（引擎侧 uint16，语义为 0–100） */
         private const val MAX_STRENGTH = 100
+
+        /** AI 应着前等待引擎空闲的上限：在途的提示搜索只有 2 秒，正常空闲时零开销直接返回 */
+        private const val STOP_BEFORE_TURN_MS = 2000L
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -172,21 +175,41 @@ class RapfiEngine(private val context: Context) {
     }
 
     /**
-     * 用户走子（引擎内部执另一色），返回引擎应着。
+     * 用户走子后让引擎应着，返回引擎着法。
+     *
+     * [position] 是**含刚落下这一手**的完整局面。这里刻意不发 `TURN`：引擎的 `turn()` 把
+     * `options.multiPV` 写死为 1，对局中就永远只有一路推荐（盘上只能画出一个候选点）。
+     * 改用分析语义的 `YXBOARD` + `YXNBEST [multiPv]`：引擎会一边流式上报多路候选（UI 借此显示
+     * 棋盘候选点与深度/胜率读数），一边在搜索结束时把选中的着手落回自己的盘面并打印一行坐标——
+     * 终态与 `TURN` 完全一致，而每次应着都按 App 的局面重摆，引擎盘面不可能漂移。
+     *
+     * [multiPv] 用设置的“分析路数”：它越大，同样 [timeMs] 预算要摊到越多根线上、搜索越浅
+     * （1 = 单路，棋力与旧的 TURN 行为一致）。
+     *
      * 会先把每步时限恢复为 [timeMs]（此前的“提示/分析”可能改过它）。
      * [strength] 只在人机对战中生效；分析与提示固定满强度（见 [syncAndAnalyze]）。
      */
-    suspend fun playUserMove(x: Int, y: Int, timeMs: Int, strength: Int): Result<Pt> =
-        withContext(writeDispatcher) {
+    suspend fun playUserMove(
+        position: List<Board.Move>,
+        multiPv: Int,
+        timeMs: Int,
+        strength: Int,
+    ): Result<Pt> {
+        // 在途搜索（提示/分析的残局）期间引擎会丢弃 YXBOARD/YXNBEST：先等空闲。
+        // 必须先于 requestMoves 装挂起点，否则被停掉的那次搜索的着法行会被当成本次应着。
+        if (!stopAndAwait(STOP_BEFORE_TURN_MS)) return Result.failure(EngineException("引擎无响应"))
+        return withContext(writeDispatcher) {
             runCatching {
                 prepareSearch(EngineStatus.Phase.THINKING)
                 requestMoves {
+                    sendBoard(position)
                     send("INFO TIMEOUT_TURN $timeMs")
                     sendStrength(strength)
-                    send("TURN $x,$y")
+                    send("YXNBEST ${multiPv.coerceAtLeast(1)}")
                 }.first()
             }
         }
+    }
 
     /** 悔棋一步（引擎内部局面回退一手） */
     suspend fun takeback(): Result<Unit> = withContext(writeDispatcher) {
@@ -262,8 +285,8 @@ class RapfiEngine(private val context: Context) {
 
     /**
      * 只同步盘面，不触发搜索（YXBOARD 后不发 YXNBEST）。
-     * 对局中做过全谱扫描/复盘后，引擎内部盘面停在扫描的最后一手，
-     * 必须同步回实战局面，否则下一次 TURN 会被引擎按错误局面应着。
+     * 对局中做过全谱扫描/复盘后，引擎内部盘面停在扫描的最后一手，这里把它摆回实战局面，
+     * 使 [takeback] 等基于引擎自有盘面的命令仍然对得上（应着本身每次整盘重摆，不依赖它）。
      * 调用前需确保引擎空闲（思考中 YXBOARD 会被丢弃）。
      */
     suspend fun syncBoard(moves: List<Board.Move>): Result<Unit> = withContext(writeDispatcher) {
@@ -282,6 +305,16 @@ class RapfiEngine(private val context: Context) {
         }
         if (idle == null) Log.w(TAG, "stopAndAwait timed out")
         return idle != null
+    }
+
+    /**
+     * 强制回到空闲。命令被引擎丢弃时（思考中只认 STOP/END）不会有着法行来清相位，
+     * 相位会一直停在 THINKING/ANALYZING，UI 永远显示“引擎思考中”并锁死全部输入。
+     */
+    fun resetPhaseIfStuck() {
+        _status.update {
+            if (it.phase == EngineStatus.Phase.IDLE) it else it.copy(phase = EngineStatus.Phase.IDLE)
+        }
     }
 
     // --------------------------------------------------------- 内部

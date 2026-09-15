@@ -47,6 +47,8 @@ import com.qwara.gomoku.GameOver
 import com.qwara.gomoku.GameUiState
 import com.qwara.gomoku.MainViewModel
 import com.qwara.gomoku.R
+import com.qwara.gomoku.engine.EngineStatus
+import com.qwara.gomoku.engine.EngineValue
 import com.qwara.gomoku.game.Board
 import com.qwara.gomoku.ui.board.GomokuBoard
 import com.qwara.gomoku.ui.components.BottomArcButtons
@@ -165,6 +167,7 @@ fun GameScreen(vm: MainViewModel) {
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
+                ThinkingReadout(state)
             }
         }
 
@@ -320,6 +323,36 @@ private fun StatusCapsuleContent(state: GameUiState) {
         text = stringResource(R.string.status_move_count_short, state.moves.size),
         color = CreamWhite.copy(alpha = 0.65f),
         fontSize = 10.sp,
+    )
+}
+
+/**
+ * 人机对战里引擎应着思考中的一行读数：深度 · 胜率（行棋方就是引擎自己）· 首选点。
+ * 数据是搜索期间持续推送的 pvLines（收集器已按 PV_PUSH_INTERVAL 节流），不需要额外引擎命令；
+ * 相位一回到 IDLE（着法落地）就收起。杀棋时第二段换成 M 数。
+ * 注意：棋力档低于 100 时引擎会在搜索结束后用 SkillMovePicker 从多路候选里随机挑点，
+ * 显示的首选点未必是它真正落下的那步（100 档才是所见即所得）。
+ */
+@Composable
+private fun ThinkingReadout(state: GameUiState) {
+    if (state.mode != GameMode.AI || state.enginePhase != EngineStatus.Phase.THINKING) return
+    val pv = state.pvLines.firstOrNull() ?: return
+    val (bx, by) = pv.moves.firstOrNull() ?: return
+    val point = "$bx,$by"
+    val mate = EngineValue.mateText(pv.eval)
+    val text = if (mate != null) {
+        stringResource(R.string.status_thinking_mate, pv.depth, mate, point)
+    } else {
+        val rate = if (pv.winRate.isNaN()) "—" else "${(pv.winRate.coerceIn(0f, 1f) * 100).toInt()}%"
+        stringResource(R.string.status_thinking_rate, pv.depth, rate, point)
+    }
+    Text(
+        text = text,
+        color = CreamWhite.copy(alpha = 0.72f),
+        fontSize = 10.sp,
+        maxLines = 1,
+        softWrap = false,
+        modifier = Modifier.padding(top = 4.dp),
     )
 }
 
