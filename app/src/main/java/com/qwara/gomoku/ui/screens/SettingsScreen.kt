@@ -4,6 +4,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +25,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -278,11 +280,17 @@ fun SettingsScreen(vm: MainViewModel) {
             )
         }
         item {
-            Text(
+            AboutLink(
                 text = stringResource(R.string.settings_about_powered),
+                url = stringResource(R.string.settings_about_engine_url),
                 color = CreamWhite.copy(alpha = 0.6f),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item {
+            AboutLink(
+                text = stringResource(R.string.settings_about_repo),
+                url = stringResource(R.string.settings_about_repo_url),
+                color = WoodAmber,
             )
         }
         item {
@@ -300,6 +308,25 @@ private fun SettingLabel(text: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 6.dp),
+    )
+}
+
+/**
+ * 关于区块里的链接行：点按交给系统打开（浏览器/应用商店）。
+ * 手表上没有能处理 http 的应用时 openUri 会抛 ActivityNotFound，静默忽略即可，不值得为此加弹窗。
+ */
+@Composable
+private fun AboutLink(text: String, url: String, color: Color) {
+    val uriHandler = LocalUriHandler.current
+    Text(
+        text = text,
+        color = color,
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            // 竖向内边距撑开点击热区，手表上细字体直接点很容易点空
+            .clickable { runCatching { uriHandler.openUri(url) } }
+            .padding(vertical = 6.dp),
     )
 }
 

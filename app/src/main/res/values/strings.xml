@@ -134,6 +134,10 @@
     <!-- 设置补充 -->
     <string name="settings_about_version">版本 %1$s</string>
     <string name="settings_about_powered">Powered by Rapfi</string>
+    <!-- 关于里的两个可点链接：显示用短地址，打开用完整 URL（均为固定值，不翻译） -->
+    <string name="settings_about_repo" translatable="false">github.com/Qwara-chan/gomoku-watch</string>
+    <string name="settings_about_repo_url" translatable="false">https://github.com/Qwara-chan/gomoku-watch</string>
+    <string name="settings_about_engine_url" translatable="false">https://github.com/dhbloo/rapfi</string>
     <string name="settings_decrease">减少</string>
     <string name="settings_increase">增加</string>
 </resources>
