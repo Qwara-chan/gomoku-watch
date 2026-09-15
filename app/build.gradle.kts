@@ -15,6 +15,12 @@ val releaseKeystoreProps = Properties().apply {
     if (f.isFile) f.inputStream().use { load(it) }
 }
 
+// 版本号：默认值供本地构建用（设置页「关于」显示的就是 versionName）；发布路径上由 CI 从
+// 发布 tag 推导后经 -PappVersionName/-PappVersionCode 覆盖，见 .github/workflows/build.yml。
+// 不这么做的话 tag 与包内版本会各说各话，且 versionCode 永不增长。
+val appVersionName = providers.gradleProperty("appVersionName").orNull ?: "1.0.0"
+val appVersionCode = providers.gradleProperty("appVersionCode").orNull?.toIntOrNull() ?: 1
+
 android {
     namespace = "com.qwara.gomoku"
     compileSdk = 37
@@ -23,8 +29,8 @@ android {
         applicationId = "com.qwara.gomoku"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
     }
 
     signingConfigs {

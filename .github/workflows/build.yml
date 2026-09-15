@@ -71,11 +71,58 @@ jobs:
           keyPassword=$KEYSTORE_KEY_PASSWORD
           EOF
 
+      - name: Resolve app version from the release tag
+        # 版本号的唯一来源是发布 tag：推 v* 标签或手动触发填了 tag 时，按 major*10000+minor*100+patch
+        # 推出 versionCode（保证后续 tag 单调递增，否则 Android 装不上），versionName 取去掉 v 的全名。
+        # 没有 tag（日常 push/PR、手动滚动构建）时留空，用 app/build.gradle.kts 里的默认值。
+        id: version
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -n "$DISPATCH_TAG" ]; then
+            TAG="$DISPATCH_TAG"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            echo "本次运行没有发布 tag：沿用仓库内默认版本号"
+            exit 0
+          fi
+          case "$TAG" in
+            v*) ;;
+            *) echo "::error::tag 须以 v 开头（例如 v1.0.1），否则与 push tag 的发布路径不一致"; exit 1 ;;
+          esac
+          NAME="${TAG#v}"
+          CORE="${NAME%%-*}"
+          CORE="${CORE%%+*}"
+          IFS=. read -r MA MI PA <<< "$CORE"
+          MA=${MA:-0}; MI=${MI:-0}; PA=${PA:-0}
+          for n in "$MA" "$MI" "$PA"; do
+            if ! [[ "$n" =~ ^[0-9]+$ ]]; then
+              echo "::error::tag「$TAG」的版本段必须是数字（形如 v1.0.1）"
+              exit 1
+            fi
+          done
+          if [ "$((10#$MI))" -gt 99 ] || [ "$((10#$PA))" -gt 99 ]; then
+            echo "::error::minor/patch 必须 ≤ 99，否则 versionCode 会跟更高版本撞号"
+            exit 1
+          fi
+          CODE=$((10#$MA * 10000 + 10#$MI * 100 + 10#$PA))
+          {
+            echo "app_version_name=$NAME"
+            echo "app_version_code=$CODE"
+            echo "version_args=-PappVersionName=$NAME -PappVersionCode=$CODE"
+          } >> "$GITHUB_OUTPUT"
+          echo "发布版本：$NAME（versionCode $CODE）"
+
       - name: Unit tests
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        env:
+          VERSION_ARGS: ${{ steps.version.outputs.version_args }}
+        run: ./gradlew :app:testDebugUnitTest --stacktrace $VERSION_ARGS
 
       - name: Build APKs
-        run: ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace
+        env:
+          VERSION_ARGS: ${{ steps.version.outputs.version_args }}
+        run: ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace $VERSION_ARGS
 
       - name: Verify optimized artifacts
         # 防退化校验：
@@ -85,6 +132,9 @@ jobs:
         # ② arm64 librapfi.so 必须是仓库提交的 PGO+ThinLTO 优化版（见 AGENTS.md 的重建
         #    配方）。用原版或其他构建覆盖提交时会因尺寸不同而失败；
         #    本地重编引擎后记得同步更新这里的预期字节数。
+        # ③ 发布路径上（有 tag）：包内报告的版本必须等于 tag 推出的版本，防止发出名不对版的包。
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.app_version_name }}
         run: |
           RELEASE_APK=$(ls app/build/outputs/apk/release/*universal*release*.apk)
           RULES=$(grep -c "qwara/gomoku" app/build/intermediates/combined_art_profile/release/compileReleaseArtProfile/baseline-prof.txt || true)
@@ -94,6 +144,13 @@ jobs:
           test "${RULES:-0}" -ge 1000 || { echo "::error::release APK 的 baseline profile 缺少应用自有规则（预期 ≥1000）"; exit 1; }
           test "$LIB" = "2487912" || { echo "::error::arm64 librapfi.so 不是提交的 PGO+ThinLTO 优化版（预期 2487912 字节）"; exit 1; }
           test "$LIB7" = "1853696" || { echo "::error::armeabi-v7a librapfi.so 不是提交的 NEON+PGO 优化版（预期 1853696 字节）"; exit 1; }
+          if [ -n "$EXPECTED_VERSION" ]; then
+            # 直接读 APK 清单（而不是 AGP 的 output-metadata.json），验的就是真正发出去的那个包
+            AAPT2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | tail -1)
+            APK_VERSION=$("$AAPT2" dump badging "$RELEASE_APK" | sed -n "s/^package:.*versionName='\([^']*\)'.*/\1/p")
+            echo "tag 版本=$EXPECTED_VERSION, 包内版本=$APK_VERSION"
+            test "$APK_VERSION" = "$EXPECTED_VERSION" || { echo "::error::APK 内版本($APK_VERSION)与 tag 版本($EXPECTED_VERSION)不一致"; exit 1; }
+          fi
 
       - name: Collect APKs
         # release：universal 全量包 + 三个单 ABI 包；debug：只收 universal 包供真机调试

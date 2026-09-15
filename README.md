@@ -59,6 +59,9 @@ Rapfi 源码：`github.com/dhbloo/rapfi`（GPLv3）；引擎版本 0.43.02。
 ./gradlew :app:assembleDebug      # 调试包
 ./gradlew :app:assembleRelease    # 发布包（已配置 R8 压缩）
 ./gradlew :app:testDebugUnitTest  # 规则单元测试
+
+# 想按某个发布版本号出包（CI 就是这么做的）：
+./gradlew :app:assembleRelease -PappVersionName=1.2.3 -PappVersionCode=10203
 ```
 
 需要 JDK 17+ 与 Android SDK（compileSdk 37）。SDK 路径请写入 `local.properties`
@@ -90,6 +93,12 @@ Rapfi 及其权重仓库（`dhbloo/rapfi-networks`）。
 - **手动触发并填 `tag`**（Actions → build → Run workflow，输入形如 `v1.0.1`）：在本次提交上建标签、
   发正式 Release，效果与推标签一致，不用先打标签；同名 Release 已存在时改为替换其中的 APK；
 - **手动触发且留空 `tag`**：只发布滚动预发布 tag `ci`（每次整体替换），适合装了看最新开发版。
+
+**版本号由 tag 决定**：发布时 CI 把 tag 换算成应用版本号传给 Gradle，`versionName` 取去掉 `v` 的标签名
+（`v1.2.3` → `1.2.3`、`v1.0.0-rc1` → `1.0.0-rc1`），`versionCode` 按 `major*10000 + minor*100 + patch`
+算出（`v1.2.3` → `10203`，所以 minor/patch 需 ≤ 99 以免与更高版本撞号），保证后续 tag 的版本码单调递增、
+装得上。日常 push/PR 与滚动 `ci` 构建没有 tag，沿用 `app/build.gradle.kts` 里的默认值（`1.0.0` / `1`）。
+发布路径上 CI 还会用 `aapt2` 把版本从 APK 清单里读回来，与 tag 不一致就让构建失败。
 
 **可选签名**：在仓库 Secrets 里配置下面 4 项后，CI 出的 release 包会用你的 keystore 签名（可直接安装）：
 
