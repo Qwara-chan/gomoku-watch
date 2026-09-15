@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Qwara-chan
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # JNI native 方法按名绑定，禁止混淆
 -keepclasseswithmembernames class * {
     native <methods>;

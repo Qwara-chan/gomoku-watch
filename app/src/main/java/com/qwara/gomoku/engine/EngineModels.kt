@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Qwara-chan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package com.qwara.gomoku.engine
 
 /** 一路着法坐标（协议坐标：x 列，y 行，0 起始） */

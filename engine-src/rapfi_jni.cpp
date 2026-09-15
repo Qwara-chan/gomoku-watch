@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Qwara-chan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /*
  *  Rapfi, a Gomoku/Renju playing engine supporting piskvork protocol.
  *  Copyright (C) 2022  Rapfi developers
