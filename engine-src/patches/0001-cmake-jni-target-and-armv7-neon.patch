@@ -1,0 +1,141 @@
+diff --git a/Rapfi/CMakeLists.txt b/Rapfi/CMakeLists.txt
+index b2c8f6b..fe973ab 100644
+--- a/Rapfi/CMakeLists.txt
++++ b/Rapfi/CMakeLists.txt
+@@ -132,6 +132,12 @@ option(NO_MULTI_THREADING "Disable multi-threading" OFF)
+ option(NO_COMMAND_MODULES "Disable command modules" OFF)
+ option(NO_PREFETCH "Disable prefetch in search" OFF)
+ 
++# Build the engine as a JNI shared library running the protocol loop in-process, instead of a
++# standalone executable. Used on Android, where SELinux forbids execve() of an app-private
++# binary, so the engine has to be loaded into the app process.
++option(BUILD_JNI "Build the JNI shared library (librapfi) in addition to the executable" OFF)
++set(JNI_INCLUDE_DIR "" CACHE PATH "Directory containing jni.h (and jni_md.h)")
++
+ option(USE_SSE  "Enable SSE2/SSSE3/SSE4.1 instruction" ${DEFAULT_USE_SSE})
+ option(USE_AVX2 "Enable AVX2/FMA instruction" ${DEFAULT_USE_AVX2})
+ option(USE_AVX512 "Enable AVX512 instruction" ${DEFAULT_USE_AVX512})
+@@ -139,6 +145,8 @@ option(USE_BMI2 "Enable BMI2 instruction" ${DEFAULT_USE_BMI2})
+ option(USE_VNNI "Enable AVX512_VNNI/AVX_VNNI instruction" ${DEFAULT_USE_VNNI})
+ option(USE_NEON "Enable NEON instruction" ${DEFAULT_USE_NEON})
+ option(USE_NEON_DOTPROD "Enable NEON DotProd instruction" ${DEFAULT_USE_NEON_DOTPROD})
++# 32 位 ARM 用纯 armv7-a+neon 旗标（兼容 Cortex-A7/A9 级老设备），不用 armv8-a+simd（否则产物三元组变 thumbv8a，且与预编译 liblz4.a 三元组冲突）
++option(USE_NEON_ARMV7_COMPAT "Compile 32-bit ARM NEON path with plain armv7-a flags" OFF)
+ option(USE_WASM_SIMD "Enable WebAssembly SIMD instruction" ${DEFAULT_USE_WASM_SIMD})
+ option(USE_WASM_SIMD_RELAXED "Enable WebAssembly Relaxed SIMD instruction" ${DEFAULT_USE_WASM_SIMD_RELAXED})
+ 
+@@ -333,6 +341,94 @@ if(NOT NO_COMMAND_MODULES)
+     target_link_libraries(rapfi PRIVATE flat.hpp zip libnpy BS_thread_pool)
+ endif()
+ 
++#==========================================================
++# JNI shared library
++
++# A shared library carries no main(), so cxxopts (only used for argv parsing) and the external
++# sources it needs are left out; everything else matches the executable. The command modules stay
++# in: NO_COMMAND_MODULES only drops the auxiliary subcommands, while gomocupLoop() lives in the
++# core sources.
++if(BUILD_JNI)
++    if(JNI_INCLUDE_DIR)
++        set(RAPFI_JNI_INCLUDE_DIRS "${JNI_INCLUDE_DIR}")
++    elseif(ANDROID)
++        # The NDK ships jni.h at a fixed location; jni_md.h lives in the per-target subdirectory.
++        set(RAPFI_JNI_INCLUDE_DIRS
++            "${CMAKE_ANDROID_NDK}/toolchains/llvm/prebuilt/${ANDROID_HOST_TAG}/sysroot/usr/include")
++    else()
++        # fallback: ask the JVM
++        find_package(JNI REQUIRED)
++        set(RAPFI_JNI_INCLUDE_DIRS ${JNI_INCLUDE_DIRS})
++    endif()
++
++    add_library(rapfi-jni SHARED
++        ${CORE_SOURCES}
++        jni/rapfi_jni.cpp)
++    set_target_properties(rapfi-jni PROPERTIES
++        OUTPUT_NAME "rapfi"
++        POSITION_INDEPENDENT_CODE ON)
++
++    target_include_directories(rapfi-jni PRIVATE ${RAPFI_JNI_INCLUDE_DIRS})
++    target_link_libraries(rapfi-jni PRIVATE cpptoml lz4 simde)
++
++    foreach(flag IN ITEMS MULTI_THREADING COMMAND_MODULES NO_PREFETCH USE_SSE USE_AVX2 USE_AVX512
++                           USE_BMI2 USE_VNNI USE_NEON USE_NEON_DOTPROD USE_WASM_SIMD
++                           USE_WASM_SIMD_RELAXED)
++        # Mirror the executable's feature macros. MULTI_THREADING is forced on (unless the caller
++        # explicitly disabled threading): the protocol loop must not run on the same thread as the
++        # search, or it can never read the STOP command that ends an analysis search.
++        if(flag STREQUAL "MULTI_THREADING" AND NOT NO_MULTI_THREADING)
++            target_compile_definitions(rapfi-jni PRIVATE MULTI_THREADING)
++        elseif(flag STREQUAL "COMMAND_MODULES" AND NOT NO_COMMAND_MODULES)
++            target_compile_definitions(rapfi-jni PRIVATE COMMAND_MODULES)
++        elseif(NOT flag STREQUAL "MULTI_THREADING" AND NOT flag STREQUAL "COMMAND_MODULES"
++               AND ${flag})
++            target_compile_definitions(rapfi-jni PRIVATE ${flag})
++        endif()
++    endforeach()
++
++    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
++       OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
++        # clang-format off
++        if(USE_AVX512)
++            target_compile_options(rapfi-jni PRIVATE -mavx512f -mavx512dq -mavx512bw)
++            if(USE_VNNI)
++                target_compile_options(rapfi-jni PRIVATE -mavx512vnni -mavx512vl)
++            endif()
++        elseif(USE_AVX2)
++            target_compile_options(rapfi-jni PRIVATE -mavx2 -mfma)
++            if(USE_VNNI)
++                target_compile_options(rapfi-jni PRIVATE -mavxvnni)
++            endif()
++        elseif(USE_SSE)
++            target_compile_options(rapfi-jni PRIVATE -msse -msse2 -msse3 -mssse3 -msse4 -msse4.1)
++        endif()
++
++        if(USE_BMI2 OR USE_AVX512)
++            target_compile_options(rapfi-jni PRIVATE -mbmi2)
++        endif()
++
++        if(USE_NEON_DOTPROD)
++            target_compile_options(rapfi-jni PRIVATE -march=armv8.2-a+dotprod)
++        elseif(USE_NEON AND NOT USE_NEON_ARMV7_COMPAT)
++            target_compile_options(rapfi-jni PRIVATE -march=armv8-a+simd)
++        endif()
++        # clang-format on
++
++        if(ANDROID)
++            # Bionic keeps pthread in libc; there is no -lpthread to link against.
++            target_link_libraries(rapfi-jni PRIVATE atomic)
++        else()
++            target_link_libraries(rapfi-jni PRIVATE pthread atomic)
++        endif()
++
++        target_compile_options(rapfi-jni PRIVATE
++            -ffp-contract=off
++            -Wall -Wno-unused-variable -Wno-unused-function -Wno-missing-braces
++            -Wno-logical-op-parentheses -Wno-parentheses -Wno-sign-compare)
++    endif()
++endif()
++
+ #==========================================================
+ # Web Assembly compiling
+ 
+@@ -581,7 +677,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "C
+ 
+     if(USE_NEON_DOTPROD)
+         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv8.2-a+dotprod")
+-	elseif(USE_NEON)
++	elseif(USE_NEON AND NOT USE_NEON_ARMV7_COMPAT)
+         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv8-a+simd")
+     endif()
+ 
+@@ -604,6 +700,10 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "C
+             target_link_libraries(rapfi PRIVATE -static)
+         elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+             target_link_libraries(rapfi PRIVATE pthread)
++        elseif(ANDROID)
++            # Bionic provides pthread and the atomics in libc/libatomic; naming either
++            # library explicitly fails to link (there is no -lpthread).
++            target_link_libraries(rapfi PRIVATE atomic)
+         else()
+ 		    target_link_libraries(rapfi PRIVATE pthread atomic)
+         endif()

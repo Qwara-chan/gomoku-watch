@@ -102,6 +102,21 @@ CI 步骤里会临时改成官方源。
 
 ## 引擎再构建（可选）
 
-`Rapfi-src/` 内含 JNI 封装（`Rapfi/jni/rapfi_jni.cpp`）与构建说明
-（`Rapfi/jni/README.md`）。重新编译三 ABI 后，把 `librapfi.so` 放到
-`app/src/main/jniLibs/<abi>/` 即可。
+JNI 封装、两处上游补丁与桌面校验器都在仓库内的 `engine-src/`（本地克隆 `Rapfi-src/` 未入库），
+构建步骤见 `engine-src/README.md`。重新编译各 ABI 后，把 `librapfi.so` 放到
+`app/src/main/jniLibs/<abi>/` 即可；产物体积若有变化，记得同步更新 CI 防退化校验里的预期字节数。
+
+## 许可与致谢
+
+本应用以 **GPL-3.0** 发布（全文见 `LICENSE`）。之所以是 GPL-3.0：打包的 Rapfi 引擎本身是
+GPL-3.0，链接它的分发必须采用同一许可。
+
+- **Rapfi**（五子棋/连珠引擎）：<https://github.com/dhbloo/rapfi>，GPL-3.0，作者见其 `AUTHORS`。
+  本仓库打包的是它的 JNI 共享库产物，**对应源码在 `engine-src/`**（JNI 封装 + 两处补丁 + 构建说明），
+  上游基线提交 `3c94c2a9`。
+- **NNUE 权重**（`app/src/main/assets/engine/common/*.bin*`）：来自
+  <https://github.com/dhbloo/rapfi-networks>，CC0-1.0，可自由分发。
+- **AndroidX / Jetpack Compose for Wear OS / Material 图标**：Apache-2.0；**Gradle wrapper**：Apache-2.0。
+
+APK 内也附了一份 GPL-3.0 全文与第三方声明（`app/src/main/assets/licenses/`）；
+应用内「设置 → 关于」直接列出本仓库与引擎仓库地址。

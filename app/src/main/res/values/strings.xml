@@ -138,6 +138,8 @@
     <string name="settings_about_repo" translatable="false">github.com/Qwara-chan/gomoku-watch</string>
     <string name="settings_about_repo_url" translatable="false">https://github.com/Qwara-chan/gomoku-watch</string>
     <string name="settings_about_engine_url" translatable="false">https://github.com/dhbloo/rapfi</string>
+    <string name="settings_about_license">以 GPL-3.0 许可发布</string>
+    <string name="settings_about_license_url" translatable="false">https://github.com/Qwara-chan/gomoku-watch/blob/main/LICENSE</string>
     <string name="settings_decrease">减少</string>
     <string name="settings_increase">增加</string>
 </resources>
