@@ -84,8 +84,12 @@ Rapfi 及其权重仓库（`dhbloo/rapfi-networks`）。
 ## 自动构建（GitHub Actions）
 
 `.github/workflows/build.yml` 在 push 到 `main`、PR、手动触发（workflow_dispatch）以及打 `v*` 标签时运行：
-跑单元测试 → 构建 debug 与 release 两个 APK → 作为构建产物（Artifacts）上传；打 tag 时还会自动创建
-GitHub Release 并把 APK 附上去。
+跑单元测试 → 构建 debug 与 release 两个 APK → 作为构建产物（Artifacts）上传。发布三条路径：
+
+- **打 `v*` 标签**推送：自动创建正式 GitHub Release 并把 APK 附上去（发布说明自动生成）；
+- **手动触发并填 `tag`**（Actions → build → Run workflow，输入形如 `v1.0.1`）：在本次提交上建标签、
+  发正式 Release，效果与推标签一致，不用先打标签；同名 Release 已存在时改为替换其中的 APK；
+- **手动触发且留空 `tag`**：只发布滚动预发布 tag `ci`（每次整体替换），适合装了看最新开发版。
 
 **可选签名**：在仓库 Secrets 里配置下面 4 项后，CI 出的 release 包会用你的 keystore 签名（可直接安装）：
 

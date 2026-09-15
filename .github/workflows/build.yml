@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Qwara-chan
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 name: build
 
 on:
@@ -6,9 +9,16 @@ on:
     tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
+    inputs:
+      tag:
+        # 填了就按这个名字建标签、发正式 Release；留空仍走滚动预发布 ci
+        description: '正式 Release 的 tag（形如 v1.0.1，须以 v 开头）；留空 = 只发滚动预发布 ci'
+        required: false
+        default: ''
+        type: string
 
 permissions:
-  contents: write   # 创建 Release 与滚动预发布 tag 需要
+  contents: write   # 创建 Release（含手动打标签）与滚动预发布 tag 需要
 
 jobs:
   build:
@@ -107,9 +117,32 @@ jobs:
           files: artifacts/*.apk
           generate_release_notes: true
 
-      - name: Publish rolling CI prerelease (manual runs)
-        # 手动触发时发布到滚动预发布 tag `ci`：每次用最新构建整体替换
-        if: github.event_name == 'workflow_dispatch'
+      - name: Publish the official GitHub Release (manual runs with a tag)
+        # 手动触发且填了 tag：在本次提交上建标签、发正式 Release（不再发滚动预发布）
+        if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 经 env 传入而非直接插值进脚本，避免输入被当成 shell 代码执行
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          case "$RELEASE_TAG" in
+            v*) ;;
+            *) echo "::error::tag 须以 v 开头（与 push tag 的发布路径一致，例如 v1.0.1）"; exit 1 ;;
+          esac
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            # 重跑（或修完问题再来一次）时替换同名 Release 里的产物，不新建
+            echo "Release $RELEASE_TAG 已存在：替换其中的 APK"
+            gh release upload "$RELEASE_TAG" artifacts/* --clobber
+          else
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" \
+              --title "$RELEASE_TAG" \
+              --generate-notes \
+              artifacts/*
+          fi
+
+      - name: Publish rolling CI prerelease (manual runs without a tag)
+        # 手动触发且没填 tag：发布到滚动预发布 tag `ci`，每次用最新构建整体替换
+        if: github.event_name == 'workflow_dispatch' && inputs.tag == ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
