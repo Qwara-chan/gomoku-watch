@@ -10,16 +10,10 @@ package com.qwara.go.ui.board
  * 屏幕位置 = center + scale * (base - center) + pan；
  * 圆屏可视区是以画布中心为圆心、半径 = side/2 的圆。
  *
- * 关键不变量（见 BoardViewportTest）：在 [MIN_SCALE, MAX_SCALE] 内，
+ * 关键不变量（见 BoardViewportTest）：在 [minScale(size), MAX_SCALE] 内，
  * 任意交叉点都能被平移到屏幕中心，因此四个角点在圆屏下也始终可达。
  */
 internal object BoardViewport {
-
-    /**
-     * 最小放大倍率：15x15 棋盘缩到圆屏内接正方形以内，
-     * 四个角点连同棋子都落在圆屏可视范围内——圆屏下唯一"一眼看全棋盘"的倍率。
-     */
-    const val MIN_SCALE = 0.66f
 
     /** 最大放大倍率：查看局部棋形 */
     const val MAX_SCALE = 3f
@@ -32,6 +26,15 @@ internal object BoardViewport {
     /** 第 index 路交叉点在基准坐标下的位置（0 起始） */
     fun baseOf(index: Int, side: Float, size: Int): Float =
         cellOf(side, size) / 2f + index * cellOf(side, size)
+
+    /**
+     * 最小放大倍率：把整盘（含四角棋子）缩进圆屏内接范围。
+     * 由“角点屏幕距 + 棋子半径 ≤ 圆半径”解出，再留 5% 余量。
+     */
+    fun minScale(size: Int): Float {
+        val bound = (0.5f - 0.44f / size) / (kotlin.math.sqrt(2f) * (size - 1) / (2f * size))
+        return bound * 0.95f
+    }
 
     /**
      * 平移上限：把最远的交叉点（四角）移到屏幕中心所需的距离，

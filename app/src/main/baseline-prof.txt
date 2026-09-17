@@ -1,4 +1,4 @@
 # 手写 baseline profile：AGP 会把它与 androidx 库自带的 profile 合并进
 # assets/dexopt/baseline.prof，安装/首次运行时由 ART 按它做 AOT 编译与类预校验。
 # 覆盖应用自有热点：启动、对局/分析状态管线、引擎协议解析、棋类规则、棋盘绘制。
-HSPLcom/qwara/gomoku/**;->**(**)**
+HSPLcom/qwara/go/**;->**(**)**

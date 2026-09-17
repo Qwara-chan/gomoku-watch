@@ -46,9 +46,8 @@ import com.qwara.go.GameUiState
 import com.qwara.go.MainViewModel
 import com.qwara.go.R
 import com.qwara.go.engine.EngineStatus
-import com.qwara.go.engine.EngineValue
 import com.qwara.go.engine.PvLine
-import com.qwara.go.ui.board.GomokuBoard
+import com.qwara.go.ui.board.GoBoardView
 import com.qwara.go.ui.components.BottomArcButtons
 import com.qwara.go.ui.components.CircleIconButton
 import com.qwara.go.ui.components.EdgeCapsule
@@ -82,7 +81,7 @@ fun AnalysisScreen(vm: MainViewModel) {
             .fillMaxSize()
             .background(DeepBlack),
     ) {
-        GomokuBoard(
+        GoBoardView(
             state = state,
             onTap = vm::onBoardTap,
             modifier = Modifier.fillMaxSize(),
@@ -131,7 +130,7 @@ fun AnalysisScreen(vm: MainViewModel) {
             ) {
                 EdgeCapsule(alpha = 0.55f) {
                     // 复盘浏览时实时变例属于“当前局面”，与屏幕上的历史局面不符：改显示历史评估
-                    DetailCapsuleContent(primary, reviewReadout(state.viewPly, state.curve))
+                    DetailCapsuleContent(primary, reviewReadout(state.viewPly, state.curve), state.boardSize)
                 }
             }
         } else {
@@ -142,7 +141,7 @@ fun AnalysisScreen(vm: MainViewModel) {
                 progress = state.scan?.let { it.done to it.total },
                 // 候选点只对“当前局面”有意义：复盘浏览/扫描期间不显示
                 candidates = if (state.viewPly == null && state.scan == null) {
-                    candidateRows(state.pvLines, state.analysisLines, state.showCandidates)
+                    candidateRows(state.pvLines, state.analysisLines, state.showCandidates, state.boardSize)
                 } else {
                     emptyList()
                 },
@@ -216,14 +215,9 @@ private fun MiniEvalContent(state: GameUiState, pv: PvLine?) {
     val ply = state.viewPly
     val reviewing = ply != null
     val winRate = if (ply != null) (state.curve[ply] ?: Float.NaN) else (pv?.winRate ?: Float.NaN)
-    val mate = if (reviewing) null else pv?.let { EngineValue.mateText(it.eval) }
     val fraction = if (winRate.isNaN()) 0f else winRate.coerceIn(0f, 1f)
     val best = if (reviewing) null else pv?.moves?.firstOrNull()
-    val label = when {
-        mate != null -> mate
-        winRate.isNaN() -> "—"
-        else -> "${(fraction * 100).toInt()}%"
-    }
+    val label = if (winRate.isNaN()) "—" else "${(fraction * 100).toInt()}%"
     Text(
         text = stringResource(R.string.analysis_eval),
         color = CreamWhite.copy(alpha = 0.8f),
@@ -246,7 +240,7 @@ private fun MiniEvalContent(state: GameUiState, pv: PvLine?) {
     }
     Spacer(Modifier.width(5.dp))
     Text(
-        text = if (best == null) label else "$label ${coord(best.first, best.second)}",
+        text = if (best == null) label else "$label ${coord(best.first, best.second, state.boardSize)}",
         color = WoodAmber,
         fontSize = 11.sp,
         maxLines = 1,
@@ -256,7 +250,7 @@ private fun MiniEvalContent(state: GameUiState, pv: PvLine?) {
 
 /** 底部胶囊：深度/选择深度 · 节点 · nps · 用时（两行：数据 + 主变例）。 */
 @Composable
-private fun DetailCapsuleContent(pv: PvLine?, reviewReadout: String?) {
+private fun DetailCapsuleContent(pv: PvLine?, reviewReadout: String?, boardSize: Int) {
     Column {
         Text(
             text = reviewReadout ?: detailText(pv),
@@ -268,7 +262,7 @@ private fun DetailCapsuleContent(pv: PvLine?, reviewReadout: String?) {
         )
         if (reviewReadout == null) {
             Text(
-                text = pvText(pv),
+                text = pvText(pv, boardSize),
                 color = CreamWhite.copy(alpha = 0.7f),
                 fontSize = 10.sp,
                 maxLines = 1,
@@ -291,30 +285,29 @@ private fun reviewReadout(ply: Int?, curve: Map<Int, Float>): String? {
     }
 }
 
-/** 思考细节：深度（含选择深度）、节点、nps、用时 */
+/** 思考细节：模拟数 + 胜率 */
 private fun detailText(pv: PvLine?): String {
     if (pv == null) return "—"
-    val depth = if (pv.selDepth > pv.depth) "D${pv.depth}/${pv.selDepth}" else "D${pv.depth}"
-    val seconds = String.format(Locale.ROOT, "%.1fs", pv.timeMs / 1000.0)
-    return "$depth · ${formatCount(pv.nodes)} · ${formatCount(pv.speed)} nps · $seconds"
+    val rate = if (pv.winRate.isNaN()) "—" else "${(pv.winRate.coerceIn(0f, 1f) * 100).toInt()}%"
+    return "${formatCount(pv.nodes)} 模拟 · $rate"
 }
 
-private fun pvText(pv: PvLine?): String {
+private fun pvText(pv: PvLine?, size: Int): String {
     val moves = pv?.moves.orEmpty()
     return if (moves.isEmpty()) {
         "—"
     } else {
-        moves.joinToString(" ") { coord(it.first, it.second) }
+        moves.joinToString(" ") { coord(it.first, it.second, size) }
     }
 }
 
-/** 候选点文案（多点分析）："A H8 62%"，与棋盘上的字母徽章对应 */
-private fun candidateRows(pvLines: List<PvLine>, lines: Int, enabled: Boolean): List<String> {
+/** 候选点文案（多点分析）："A Q16 62%"，与棋盘上的字母徽章对应 */
+private fun candidateRows(pvLines: List<PvLine>, lines: Int, enabled: Boolean, size: Int): List<String> {
     if (!enabled) return emptyList()
     return pvLines.take(lines).mapIndexedNotNull { i, pv ->
         val pt = pv.moves.firstOrNull() ?: return@mapIndexedNotNull null
         val pct = if (pv.winRate.isNaN()) "—" else "${(pv.winRate.coerceIn(0f, 1f) * 100).toInt()}%"
-        "${('A' + i)} ${coord(pt.first, pt.second)} $pct"
+        "${('A' + i)} ${coord(pt.first, pt.second, size)} $pct"
     }
 }
 
@@ -325,5 +318,8 @@ private fun formatCount(value: Long): String = when {
     else -> value.toString()
 }
 
-/** 坐标显示为 A1 形式：列用字母，行用数字（1 起始）。 */
-private fun coord(x: Int, y: Int): String = "${('A' + x)}${y + 1}"
+/** 坐标显示为 GTP 习惯：列字母（跳 I），行号从底边数 1 起。 */
+private fun coord(x: Int, y: Int, size: Int): String {
+    val col = if (x < 8) ('A' + x) else ('A' + x + 1)
+    return "$col${size - y}"
+}

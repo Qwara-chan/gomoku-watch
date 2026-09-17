@@ -22,11 +22,11 @@ val appVersionName = providers.gradleProperty("appVersionName").orNull ?: "1.0.0
 val appVersionCode = providers.gradleProperty("appVersionCode").orNull?.toIntOrNull() ?: 1
 
 android {
-    namespace = "com.qwara.gomoku"
+    namespace = "com.qwara.go"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.qwara.gomoku"
+        applicationId = "com.qwara.go"
         minSdk = 26
         targetSdk = 36
         versionCode = appVersionCode

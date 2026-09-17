@@ -1,21 +1,21 @@
 第三方组件与许可 / Third-party notices
 =====================================
 
-本应用（gomoku-watch）以 GNU GPL v3.0 发布，版权归其作者所有。
+本应用（gomoku-watch，围棋分支 go-pachi）以 GNU GPL v3.0 发布，版权归其作者所有。
 源码与问题反馈：https://github.com/Qwara-chan/gomoku-watch
 GPL-3.0 全文见同目录 LICENSE-GPL-3.0.txt。
 
-1) Rapfi —— 五子棋/连珠引擎（本应用的分析与人机对战由它驱动）
-   源码：https://github.com/dhbloo/rapfi
-   许可：GNU GPL v3.0
-   版权：归 Rapfi 作者及贡献者所有（见上游仓库的 AUTHORS 文件）
-   说明：本应用打包的是它的 JNI 共享库 librapfi.so。按 GPL-3.0 要求，
-   该二进制对应的源码（JNI 封装、对上游的两处补丁、构建与 PGO 配方、桌面校验器）
-   见本仓库 engine-src/ 目录；上游基线提交 3c94c2a9。
+1) Pachi —— 围棋引擎（本应用的分析与人机对战由它驱动）
+   源码：https://github.com/pasky/pachi
+   许可：GNU GPL v2.0 or later（与 GPL-3.0 兼容；全文见 LICENSE-GPL-2.0.txt）
+   版权：归 Pachi 作者及贡献者所有（见上游仓库的 CREDITS 文件，作者 Petr "Pasky" Baudiš）
+   说明：本应用打包的是它的 JNI 共享库 libpachi.so（纯蒙特卡洛构建，无 DCNN）。
+   按 GPL 要求，该二进制对应的源码（JNI 封装与构建配方、桌面校验器）
+   见本仓库 engine-src/ 目录；上游基线提交 617986f4。
 
-2) Rapfi NNUE 权重（app/src/main/assets/engine/common/*.bin 与 *.bin.lz4）
-   来源：https://github.com/dhbloo/rapfi-networks
-   许可：CC0-1.0（可自由分发）
+2) Pachi 数据文件（app/src/main/assets/engine/common/）
+   patterns_mm.gamma / patterns_mm.spat：随 pachi 源码仓库分发（GPL-2.0+）
+   opening.dat：pachi 官方发布（https://github.com/pasky/pachi/releases，GPL-2.0+）
 
 3) AndroidX / Jetpack Compose for Wear OS / Material Icons / Kotlin 标准库
    许可：Apache License 2.0

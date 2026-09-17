@@ -43,22 +43,12 @@ import androidx.wear.compose.material3.Text
 import com.qwara.go.MainViewModel
 import com.qwara.go.R
 import com.qwara.go.data.SettingsRepository
-import com.qwara.go.game.Rule
 import com.qwara.go.ui.components.ChoiceButton
 import com.qwara.go.ui.theme.CreamWhite
 import com.qwara.go.ui.theme.WoodAmber
 
 private const val MIN_ENGINE_SEC = 1
 private const val MAX_ENGINE_SEC = 10
-
-/** 棋力档位文案，与 SettingsRepository.STRENGTH_PRESETS 一一对应 */
-private val STRENGTH_LABELS = intArrayOf(
-    R.string.settings_strength_0,
-    R.string.settings_strength_1,
-    R.string.settings_strength_2,
-    R.string.settings_strength_3,
-    R.string.settings_strength_4,
-)
 
 @Composable
 fun SettingsScreen(vm: MainViewModel) {
@@ -102,20 +92,56 @@ fun SettingsScreen(vm: MainViewModel) {
         }
 
         item {
-            SettingLabel(stringResource(R.string.settings_rule))
+            SettingLabel(stringResource(R.string.settings_board_size))
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ChoiceButton(
-                    text = stringResource(R.string.settings_rule_freestyle),
-                    selected = settings.rule == Rule.FREESTYLE,
-                    onClick = { vm.setRule(Rule.FREESTYLE) },
+                SettingsRepository.BOARD_SIZES.forEach { n ->
+                    ChoiceButton(
+                        text = stringResource(R.string.settings_board_size_value, n),
+                        selected = settings.boardSize == n,
+                        onClick = { vm.setBoardSize(n) },
+                    )
+                }
+            }
+        }
+        item {
+            Text(
+                text = stringResource(R.string.settings_board_size_note),
+                color = CreamWhite.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+                fontSize = 10.sp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        item {
+            SettingLabel(stringResource(R.string.settings_komi))
+        }
+        item {
+            val komiIndex = SettingsRepository.KOMI_PRESETS.toList().indexOf(settings.komi)
+                .takeIf { it >= 0 } ?: 0
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                IconButton(
+                    onClick = { vm.setKomi(SettingsRepository.KOMI_PRESETS[(komiIndex - 1).coerceAtLeast(0)]) },
+                    enabled = komiIndex > 0,
+                ) {
+                    MinusGlyph()
+                }
+                Text(
+                    text = stringResource(R.string.settings_komi_value, settings.komi),
+                    color = WoodAmber,
+                    modifier = Modifier.padding(horizontal = 10.dp),
                 )
-                ChoiceButton(
-                    text = stringResource(R.string.settings_rule_renju),
-                    selected = settings.rule == Rule.RENJU,
-                    onClick = { vm.setRule(Rule.RENJU) },
-                )
+                IconButton(
+                    onClick = { vm.setKomi(SettingsRepository.KOMI_PRESETS[(komiIndex + 1).coerceAtMost(SettingsRepository.KOMI_PRESETS.lastIndex)]) },
+                    enabled = komiIndex < SettingsRepository.KOMI_PRESETS.lastIndex,
+                ) {
+                    androidx.wear.compose.material3.Icon(Icons.Default.Add, stringResource(R.string.settings_increase))
+                }
             }
         }
 
@@ -145,50 +171,6 @@ fun SettingsScreen(vm: MainViewModel) {
                     androidx.wear.compose.material3.Icon(Icons.Default.Add, stringResource(R.string.settings_increase))
                 }
             }
-        }
-
-        item {
-            SettingLabel(stringResource(R.string.settings_strength))
-        }
-        item {
-            val index = SettingsRepository.nearestStrengthIndex(settings.strength)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                IconButton(
-                    onClick = {
-                        vm.setStrength(SettingsRepository.STRENGTH_PRESETS[(index - 1).coerceAtLeast(0)])
-                    },
-                    enabled = index > 0,
-                ) {
-                    MinusGlyph()
-                }
-                Text(
-                    text = stringResource(STRENGTH_LABELS[index]),
-                    color = WoodAmber,
-                    modifier = Modifier.padding(horizontal = 10.dp),
-                )
-                IconButton(
-                    onClick = {
-                        vm.setStrength(
-                            SettingsRepository.STRENGTH_PRESETS[(index + 1).coerceAtMost(STRENGTH_LABELS.lastIndex)],
-                        )
-                    },
-                    enabled = index < STRENGTH_LABELS.lastIndex,
-                ) {
-                    androidx.wear.compose.material3.Icon(Icons.Default.Add, stringResource(R.string.settings_increase))
-                }
-            }
-        }
-        item {
-            Text(
-                text = stringResource(R.string.settings_strength_note),
-                color = CreamWhite.copy(alpha = 0.6f),
-                textAlign = TextAlign.Center,
-                fontSize = 10.sp,
-                modifier = Modifier.fillMaxWidth(),
-            )
         }
 
         item {
@@ -227,22 +209,6 @@ fun SettingsScreen(vm: MainViewModel) {
                 onCheckedChange = vm::setShowMoveNumbers,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.settings_display_numbers)) },
-            )
-        }
-        item {
-            SwitchButton(
-                checked = settings.showForbidden,
-                onCheckedChange = vm::setShowForbidden,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.settings_display_forbidden)) },
-            )
-        }
-        item {
-            SwitchButton(
-                checked = settings.showWinLine,
-                onCheckedChange = vm::setShowWinLine,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.settings_display_win_line)) },
             )
         }
         item {

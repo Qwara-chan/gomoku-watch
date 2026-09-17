@@ -59,8 +59,7 @@ import androidx.compose.material.icons.filled.Home
 import com.qwara.go.GameMode
 import com.qwara.go.GameUiState
 import com.qwara.go.engine.EngineStatus
-import com.qwara.go.game.Board
-import com.qwara.go.game.RenjuRules
+import com.qwara.go.game.GoBoard
 import com.qwara.go.ui.components.CircleIconButton
 import com.qwara.go.ui.theme.BlackStone
 import com.qwara.go.ui.theme.CreamWhite
@@ -77,13 +76,19 @@ import kotlin.math.hypot
 import kotlin.math.min
 import kotlinx.coroutines.launch
 
-private const val TAG = "GomokuBoard"
-private const val STARS_AT = 3
+private const val TAG = "GoBoardView"
 
-// 缩放范围与平移上限见 BoardViewport（纯几何 + 单测覆盖圆屏四角可达性）
-private const val MIN_SCALE = BoardViewport.MIN_SCALE
+// 缩放范围与平移上限见 BoardViewport（纯几何 + 单测覆盖圆屏四角可达性）；
+// 最小倍率按路数计算：整盘（含角子）缩进圆屏内接范围
 private const val MAX_SCALE = BoardViewport.MAX_SCALE
 private const val DEFAULT_SCALE = BoardViewport.DEFAULT_SCALE
+
+/** 星位（0 起始线路）：9 路 2/4/6，13 路 3/6/9，19 路 3/9/15 */
+private fun starPoints(size: Int): List<Int> = when (size) {
+    9 -> listOf(2, 4, 6)
+    13 -> listOf(3, 6, 9)
+    else -> listOf(3, 9, 15)
+}
 
 /**
  * 滚轮源表冠的缩放灵敏度：applyRotary 的输入 = 事件增量 × 本系数。
@@ -101,7 +106,7 @@ private const val CANDIDATE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 private val CANDIDATE_COLORS = listOf(HintGreen, WoodAmber, CreamWhite)
 
 /**
- * 15x15 五子棋棋盘。
+ * 围棋棋盘（9/13/19 路）。
  *
  * 交互：
  *  - 点按交叉点落子；
@@ -110,7 +115,7 @@ private val CANDIDATE_COLORS = listOf(HintGreen, WoodAmber, CreamWhite)
  *  - 视图偏离默认时右上角出现"复位"按钮。
  */
 @Composable
-fun GomokuBoard(
+fun GoBoardView(
     state: GameUiState,
     onTap: (Int, Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -122,6 +127,7 @@ fun GomokuBoard(
     val latestState by rememberUpdatedState(state)
 
     // ---- 视图状态：缩放 + 平移 ----
+    val minScale = BoardViewport.minScale(size)
     var viewScale by remember { mutableStateOf(DEFAULT_SCALE) }
     var pan by remember { mutableStateOf(Offset.Zero) }
     var canvasSize by remember { mutableStateOf(IntSize(1, 1)) }
@@ -144,9 +150,6 @@ fun GomokuBoard(
     // 徽章/序号文字样式：从 draw 块提升，避免每次绘制重新分配 TextStyle。
     // 原先的 toSp() 是 DrawScope（Density）的成员，这里用同一 density 包一层保证字号换算一致
     val density = LocalDensity.current
-    val forbiddenBadgeStyle = remember(baseCell, density) {
-        TextStyle(fontSize = with(density) { (baseCell * 0.40f).toSp() }, fontWeight = FontWeight.Bold)
-    }
     val candidateBadgeStyle = remember(baseCell, density) {
         TextStyle(fontSize = with(density) { (baseCell * 0.42f).toSp() }, fontWeight = FontWeight.Bold)
     }
@@ -227,7 +230,7 @@ fun GomokuBoard(
         // 表冠向后（dy > 0）放大、向前缩小（用户要求的方向；三条输入通路都汇到这里，
         // 只在这里定符号即可保持一致）。指数形式保证任何步长都不会把系数拉到负值
         val factor = exp(dy * 0.10f)
-        viewScale = (viewScale * factor).coerceIn(MIN_SCALE, MAX_SCALE)
+        viewScale = (viewScale * factor).coerceIn(minScale, MAX_SCALE)
         pan = clampPan(pan, viewScale)
     }
 
@@ -331,7 +334,7 @@ fun GomokuBoard(
                                         last = center
                                     } else if (pinchStartDist > 0f) {
                                         viewScale = (pinchStartScale * dist / pinchStartDist)
-                                            .coerceIn(MIN_SCALE, MAX_SCALE)
+                                            .coerceIn(minScale, MAX_SCALE)
                                         pan = clampPan(pan + (center - last), viewScale)
                                         last = center
                                     }
@@ -349,14 +352,14 @@ fun GomokuBoard(
                                             dragging = !nearCorner(start)
                                         }
                                         if (dragging) {
-                                            if (viewScale <= MIN_SCALE + 0.02f) {
-                                                // 最小倍率下拖入：随拖拽距离渐进放大（避免跳变），无需先转表冠
+                                            if (viewScale <= minScale + 0.02f) {
+                                                // 最小倍率（整盘视图）下拖入：随拖拽距离渐进放大，无需先转表冠
                                                 onUserInteraction?.invoke()
                                                 val dragDist = hypot(
                                                     change.position.x - start.x,
                                                     change.position.y - start.y,
                                                 )
-                                                viewScale = MIN_SCALE +
+                                                viewScale = minScale +
                                                     (dragDist / 280f).coerceAtMost(0.9f)
                                             }
                                             pan = clampPan(pan + (change.position - last), viewScale)
@@ -387,11 +390,11 @@ fun GomokuBoard(
                             // 双击已有棋子处：缩放视图（单手替代捏合）；空点上的连续两次点击按两次落子处理
                             val now = android.os.SystemClock.uptimeMillis()
                             val doubleTap = now - lastTapAt < 300 &&
-                                latestState.colorAt(gx, gy) != Board.Color.EMPTY
+                                latestState.colorAt(gx, gy) != GoBoard.Color.EMPTY
                             if (doubleTap) {
                                 lastTapAt = 0
                                 if (viewScale > 1.5f) {
-                                    animateZoomTo(MIN_SCALE, Offset.Zero)
+                                    animateZoomTo(minScale, Offset.Zero)
                                 } else {
                                     val (ts, tp) = focusZoomTarget(up.position, 2.2f)
                                     animateZoomTo(ts, tp)
@@ -461,12 +464,14 @@ fun GomokuBoard(
                 }
 
                 val starRadius = cell * 0.11f
+                val stars = starPoints(size)
+                val mid = size / 2
                 for ((sx, sy) in listOf(
-                    STARS_AT to STARS_AT,
-                    STARS_AT to size - 1 - STARS_AT,
-                    size - 1 - STARS_AT to STARS_AT,
-                    size - 1 - STARS_AT to size - 1 - STARS_AT,
-                    size / 2 to size / 2,
+                    stars[0] to stars[0],
+                    stars[0] to stars[2],
+                    stars[2] to stars[0],
+                    stars[2] to stars[2],
+                    mid to mid,
                 )) {
                     drawCircle(
                         color = BlackStone.copy(alpha = 0.75f),
@@ -478,62 +483,22 @@ fun GomokuBoard(
                 for (y in 0 until size) {
                     for (x in 0 until size) {
                         when (state.colorAt(x, y)) {
-                            Board.Color.BLACK -> stones.draw(
+                            GoBoard.Color.BLACK -> stones.draw(
                                 this,
                                 center = Offset(left + pad + x * cell, top + pad + y * cell),
                                 dark = true,
                             )
-                            Board.Color.WHITE -> stones.draw(
+                            GoBoard.Color.WHITE -> stones.draw(
                                 this,
                                 center = Offset(left + pad + x * cell, top + pad + y * cell),
                                 dark = false,
                             )
-                            Board.Color.EMPTY -> Unit
+                            GoBoard.Color.EMPTY -> Unit
                         }
                     }
                 }
 
-                // 胜利连线：压在棋子上层，半透明让手数仍可读
-                if (state.showWinLine && state.winLine.size >= 2) {
-                    val head = state.winLine.first()
-                    val tail = state.winLine.last()
-                    drawLine(
-                        color = WoodAmber.copy(alpha = 0.55f),
-                        start = Offset(left + pad + head.first * cell, top + pad + head.second * cell),
-                        end = Offset(left + pad + tail.first * cell, top + pad + tail.second * cell),
-                        strokeWidth = cell * 0.16f,
-                        cap = StrokeCap.Round,
-                    )
-                }
 
-                // 禁手点：按类型着色的小徽章 + 单字（三三/四四/长连）
-                if (state.showForbidden && state.forbidden.isNotEmpty()) {
-                    for ((pt, type) in state.forbidden) {
-                        val fx = pt.first
-                        val fy = pt.second
-                        if (fx !in 0 until size || fy !in 0 until size) continue
-                        val glyph = when (type) {
-                            RenjuRules.Forbidden.DOUBLE_THREE -> "三" to WoodAmber
-                            RenjuRules.Forbidden.DOUBLE_FOUR -> "四" to ErrorRed
-                            RenjuRules.Forbidden.OVERLINE -> "长" to CreamWhite
-                            RenjuRules.Forbidden.NONE -> continue
-                        }
-                        val cx = left + pad + fx * cell
-                        val cy = top + pad + fy * cell
-                        drawCircle(PanelDark.copy(alpha = 0.72f), radius = cell * 0.30f, center = Offset(cx, cy))
-                        drawCircle(
-                            color = glyph.second,
-                            radius = cell * 0.30f,
-                            center = Offset(cx, cy),
-                            style = Stroke(width = (cell * 0.07f).coerceAtLeast(1f)),
-                        )
-                        val layout = textCache.layout(glyph.first, glyph.second, forbiddenBadgeStyle)
-                        drawText(
-                            textLayoutResult = layout,
-                            topLeft = Offset(cx - layout.size.width / 2f, cy - layout.size.height / 2f),
-                        )
-                    }
-                }
 
                 // 多点分析：候选点 A/B/C 徽章。人机对战里引擎应着（THINKING）时同样画，
                 // 画面上就是它此刻的思考过程；复盘浏览时不画
@@ -545,7 +510,7 @@ fun GomokuBoard(
                         val (gx, gy) = pt
                         if (gx !in 0 until size || gy !in 0 until size) return@forEachIndexed
                         // 引擎吐出的候选点理论上都在空点上，防御性判断避免盖住棋子
-                        if (state.colorAt(gx, gy) != Board.Color.EMPTY) return@forEachIndexed
+                        if (state.colorAt(gx, gy) != GoBoard.Color.EMPTY) return@forEachIndexed
                         val color = CANDIDATE_COLORS[i % CANDIDATE_COLORS.size]
                         val cx = left + pad + gx * cell
                         val cy = top + pad + gy * cell
@@ -585,7 +550,7 @@ fun GomokuBoard(
                     val style = if (shownMoves.size >= 100) moveNumberCompactStyle else moveNumberStyle
                     shownMoves.forEachIndexed { i, m ->
                         if (m.x !in 0 until size || m.y !in 0 until size) return@forEachIndexed
-                        val color = if (m.color == Board.Color.BLACK) CreamWhite else BlackStone
+                        val color = if (m.color == GoBoard.Color.BLACK) CreamWhite else BlackStone
                         val layout = textCache.layout((i + 1).toString(), color, style)
                         val cx = left + pad + m.x * cell
                         val cy = top + pad + m.y * cell
@@ -619,7 +584,7 @@ fun GomokuBoard(
         }
 
         // 复位按钮：圆形图标钮，吸附右边缘；视图偏离默认时出现
-        // 偏离默认视图才显示复位钮：拿 MIN_SCALE 比较会恒真（默认 1.0 > 最小 0.66），
+        // 偏离默认视图才显示复位钮：拿最小倍率比较会恒真（默认 1.0 > 最小约 0.68），
         // 导致复位钮常驻并挡住棋盘右中部
         if (viewOffDefault) {
             CircleIconButton(

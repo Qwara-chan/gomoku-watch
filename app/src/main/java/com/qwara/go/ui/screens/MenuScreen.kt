@@ -36,7 +36,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qwara.go.MainViewModel
 import com.qwara.go.R
-import com.qwara.go.game.Board
+import com.qwara.go.game.GoBoard
 import com.qwara.go.ui.components.ChoiceButton
 import com.qwara.go.ui.components.WideButton
 import com.qwara.go.ui.theme.WoodAmber
@@ -45,7 +45,7 @@ import com.qwara.go.ui.theme.WoodAmber
 fun MenuScreen(vm: MainViewModel) {
     var showColorDialog by remember { mutableStateOf(false) }
     // 弹窗里选中的执子：勾按它开局，叉取消
-    var chosenColor by remember { mutableStateOf(Board.Color.BLACK) }
+    var chosenColor by remember { mutableStateOf(GoBoard.Color.BLACK) }
     val state by vm.ui.collectAsStateWithLifecycle()
     // 内存里还留着没下完的棋：给一个明确的"回去接着下"入口
     val resumable = state.moves.isNotEmpty() && state.gameOver == null
@@ -138,13 +138,13 @@ fun MenuScreen(vm: MainViewModel) {
                     ) {
                         ChoiceButton(
                             text = stringResource(R.string.play_as_black),
-                            selected = chosenColor == Board.Color.BLACK,
-                            onClick = { chosenColor = Board.Color.BLACK },
+                            selected = chosenColor == GoBoard.Color.BLACK,
+                            onClick = { chosenColor = GoBoard.Color.BLACK },
                         )
                         ChoiceButton(
                             text = stringResource(R.string.play_as_white),
-                            selected = chosenColor == Board.Color.WHITE,
-                            onClick = { chosenColor = Board.Color.WHITE },
+                            selected = chosenColor == GoBoard.Color.WHITE,
+                            onClick = { chosenColor = GoBoard.Color.WHITE },
                         )
                     }
                 }

@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -46,14 +47,12 @@ import androidx.wear.compose.material3.SwitchButton
 import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TextButton
 import com.qwara.go.GameMode
-import com.qwara.go.GameOver
 import com.qwara.go.GameUiState
 import com.qwara.go.MainViewModel
 import com.qwara.go.R
 import com.qwara.go.engine.EngineStatus
-import com.qwara.go.engine.EngineValue
-import com.qwara.go.game.Board
-import com.qwara.go.ui.board.GomokuBoard
+import com.qwara.go.game.GoBoard
+import com.qwara.go.ui.board.GoBoardView
 import com.qwara.go.ui.components.BottomArcButtons
 import com.qwara.go.ui.components.ChoiceButton
 import com.qwara.go.ui.components.ChromeVisibility
@@ -133,7 +132,7 @@ fun GameScreen(vm: MainViewModel) {
             .fillMaxSize()
             .background(DeepBlack),
     ) {
-        GomokuBoard(
+        GoBoardView(
             state = state,
             onTap = vm::onBoardTap,
             modifier = Modifier.fillMaxSize(),
@@ -210,7 +209,7 @@ fun GameScreen(vm: MainViewModel) {
                 .align(Alignment.BottomCenter)
                 .fillMaxSize(),
         ) {
-            BottomArcButtons(buttonCount = 4) { i ->
+            BottomArcButtons(buttonCount = 5) { i ->
                 when (i) {
                     0 -> CircleIconButton(
                         icon = Icons.Default.Refresh,
@@ -225,6 +224,12 @@ fun GameScreen(vm: MainViewModel) {
                         label = stringResource(R.string.action_redo),
                     )
                     2 -> CircleIconButton(
+                        icon = Icons.AutoMirrored.Filled.ExitToApp,
+                        onClick = vm::pass,
+                        enabled = !state.engineThinking && state.gameOver == null,
+                        label = stringResource(R.string.action_pass),
+                    )
+                    3 -> CircleIconButton(
                         icon = Icons.Default.Star,
                         onClick = vm::hint,
                         enabled = !state.engineThinking && state.gameOver == null,
@@ -298,18 +303,18 @@ fun GameScreen(vm: MainViewModel) {
 /** 胶囊内的状态内容：回合点 + 状态文字 + 手数。 */
 @Composable
 private fun StatusCapsuleContent(state: GameUiState) {
-    val turnColor = if (state.sideToMove == Board.Color.BLACK) BlackStone else CreamWhite
+    val turnColor = if (state.sideToMove == GoBoard.Color.BLACK) BlackStone else CreamWhite
     val statusText = when {
         state.engineThinking -> stringResource(R.string.status_engine_thinking)
         state.editMode -> stringResource(
             R.string.status_edit_mode,
-            if (state.editColor == Board.Color.BLACK) {
+            if (state.editColor == GoBoard.Color.BLACK) {
                 stringResource(R.string.stone_black)
             } else {
                 stringResource(R.string.stone_white)
             },
         )
-        state.sideToMove == Board.Color.BLACK -> stringResource(R.string.status_black_turn)
+        state.sideToMove == GoBoard.Color.BLACK -> stringResource(R.string.status_black_turn)
         else -> stringResource(R.string.status_white_turn)
     }
     Box(
@@ -330,33 +335,31 @@ private fun StatusCapsuleContent(state: GameUiState) {
 }
 
 /**
- * 人机对战里引擎应着思考中的一行读数：深度 · 胜率（行棋方就是引擎自己）· 首选点。
+ * 人机对战里引擎应着思考中的一行读数：胜率（行棋方就是引擎自己）· 首选点。
  * 数据是搜索期间持续推送的 pvLines（收集器已按 PV_PUSH_INTERVAL 节流），不需要额外引擎命令；
- * 相位一回到 IDLE（着法落地）就收起。杀棋时第二段换成 M 数。
- * 注意：棋力档低于 100 时引擎会在搜索结束后用 SkillMovePicker 从多路候选里随机挑点，
- * 显示的首选点未必是它真正落下的那步（100 档才是所见即所得）。
+ * 相位一回到 IDLE（着法落地）就收起。
  */
 @Composable
 private fun ThinkingReadout(state: GameUiState) {
     if (state.mode != GameMode.AI || state.enginePhase != EngineStatus.Phase.THINKING) return
     val pv = state.pvLines.firstOrNull() ?: return
     val (bx, by) = pv.moves.firstOrNull() ?: return
-    val point = "$bx,$by"
-    val mate = EngineValue.mateText(pv.eval)
-    val text = if (mate != null) {
-        stringResource(R.string.status_thinking_mate, pv.depth, mate, point)
-    } else {
-        val rate = if (pv.winRate.isNaN()) "—" else "${(pv.winRate.coerceIn(0f, 1f) * 100).toInt()}%"
-        stringResource(R.string.status_thinking_rate, pv.depth, rate, point)
-    }
+    val point = goCoord(bx, by, state.boardSize)
+    val rate = if (pv.winRate.isNaN()) "—" else "${(pv.winRate.coerceIn(0f, 1f) * 100).toInt()}%"
     Text(
-        text = text,
+        text = stringResource(R.string.status_thinking_rate, rate, point),
         color = CreamWhite.copy(alpha = 0.72f),
         fontSize = 10.sp,
         maxLines = 1,
         softWrap = false,
         modifier = Modifier.padding(top = 4.dp),
     )
+}
+
+/** 坐标显示为 GTP 习惯：列字母（跳 I），行号从底边数 1 起 */
+private fun goCoord(x: Int, y: Int, size: Int): String {
+    val col = if (x < 8) ('A' + x) else ('A' + x + 1)
+    return "$col${size - y}"
 }
 
 @Composable
@@ -366,12 +369,7 @@ private fun GameOverOverlay(
     onMenu: () -> Unit,
     onViewBoard: () -> Unit,
 ) {
-    val title = when (state.gameOver) {
-        GameOver.BLACK_WIN -> stringResource(R.string.game_over_black)
-        GameOver.WHITE_WIN -> stringResource(R.string.game_over_white)
-        GameOver.DRAW -> stringResource(R.string.status_game_over_draw)
-        null -> return
-    }
+    val title = state.gameOver ?: return
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -467,13 +465,13 @@ private fun GameMenuDialog(
                         )
                         ChoiceButton(
                             text = stringResource(R.string.stone_black),
-                            selected = state.editColor == Board.Color.BLACK,
-                            onClick = { vm.setEditColor(Board.Color.BLACK) },
+                            selected = state.editColor == GoBoard.Color.BLACK,
+                            onClick = { vm.setEditColor(GoBoard.Color.BLACK) },
                         )
                         ChoiceButton(
                             text = stringResource(R.string.stone_white),
-                            selected = state.editColor == Board.Color.WHITE,
-                            onClick = { vm.setEditColor(Board.Color.WHITE) },
+                            selected = state.editColor == GoBoard.Color.WHITE,
+                            onClick = { vm.setEditColor(GoBoard.Color.WHITE) },
                         )
                     }
                 }

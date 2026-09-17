@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">五子棋</string>
+    <string name="app_name">围棋</string>
 
     <!-- 主菜单 -->
     <string name="menu_two_player">双人对战</string>
     <string name="menu_two_player_sub">同表对弈 · 可摆谱</string>
     <string name="menu_ai">人机对战</string>
-    <string name="menu_ai_sub">挑战 Rapfi 引擎</string>
+    <string name="menu_ai_sub">挑战 Pachi 引擎</string>
     <string name="menu_analysis">局面分析</string>
-    <string name="menu_analysis_sub">Rapfi 引擎深度分析</string>
+    <string name="menu_analysis_sub">Pachi 引擎实时分析</string>
     <string name="menu_settings">设置</string>
     <string name="menu_resume">继续对局</string>
     <string name="menu_resume_sub">第 %1$d 手 · 棋盘仍保留</string>
@@ -18,6 +18,7 @@
     <string name="action_undo">悔棋</string>
     <string name="action_redo">重做</string>
     <string name="action_hint">提示</string>
+    <string name="action_pass">停一手</string>
     <string name="action_menu">菜单</string>
     <string name="action_restart">重新开始</string>
     <string name="action_flip">翻转棋盘</string>
@@ -32,46 +33,35 @@
     <string name="status_black_turn">黑棋行棋</string>
     <string name="status_white_turn">白棋行棋</string>
     <string name="status_engine_thinking">引擎思考中…</string>
-    <!-- 人机对战思考中读数：深度 · 行棋方（即引擎）胜率 · 首选点；杀棋时换成 M 数 -->
-    <string name="status_thinking_rate">深度 %1$d · 胜率 %2$s · 首选 %3$s</string>
-    <string name="status_thinking_mate">深度 %1$d · 杀 %2$s · 首选 %3$s</string>
+    <!-- 人机对战思考中读数：行棋方（即引擎）胜率 · 首选点 -->
+    <string name="status_thinking_rate">胜率 %1$s · 首选 %2$s</string>
     <string name="status_your_turn">轮到你走</string>
-    <string name="status_game_over_win">%1$s 获胜</string>
-    <string name="status_game_over_draw">平局</string>
-    <string name="status_forbidden_move">禁手！黑棋不能下这里</string>
     <string name="status_occupied">该点已有棋子</string>
+    <string name="status_illegal_suicide">自杀禁着</string>
+    <string name="status_illegal_ko">劫争禁着</string>
+    <string name="status_engine_pass">引擎停一手</string>
 
     <!-- 设置 -->
+    <string name="settings_board_size">棋盘路数</string>
+    <string name="settings_board_size_value">%1$d 路</string>
+    <string name="settings_board_size_note">改动会清空棋盘</string>
+    <string name="settings_komi">贴目</string>
+    <string name="settings_komi_value">%1$s 目</string>
     <string name="settings_engine_time">引擎每步用时</string>
     <string name="settings_engine_time_value">%1$d 秒</string>
-    <string name="settings_rule">规则</string>
-    <string name="settings_rule_freestyle">无禁手</string>
-    <string name="settings_rule_renju">有禁手</string>
     <string name="settings_sound">落子音效</string>
     <string name="settings_vibrate">震动反馈</string>
     <string name="settings_engine">引擎信息</string>
     <string name="settings_engine_loading">引擎加载中…</string>
     <string name="settings_about">关于</string>
-    <string name="settings_strength">引擎棋力</string>
-    <string name="settings_strength_value">%1$s</string>
-    <string name="settings_strength_note">仅影响人机对战，分析与提示始终满强度</string>
-    <string name="settings_strength_0">入门</string>
-    <string name="settings_strength_1">初级</string>
-    <string name="settings_strength_2">中级</string>
-    <string name="settings_strength_3">高级</string>
-    <string name="settings_strength_4">最强</string>
     <string name="settings_lines">分析路数</string>
-    <string name="settings_lines_note">对局与提示也按此路数搜索；1 路时棋力最强</string>
+    <string name="settings_lines_note">对局与提示也按此路数显示候选；路数多时同一时限下搜索更浅</string>
     <string name="settings_display">显示</string>
     <string name="settings_display_numbers">手数序号</string>
-    <string name="settings_display_forbidden">禁手标记</string>
-    <string name="settings_display_win_line">胜利连线</string>
     <string name="settings_display_candidates">候选点标记</string>
 
     <!-- 分析 -->
-    <string name="analysis_depth">深度 %1$d</string>
-    <string name="analysis_nodes">%1$s 节点</string>
-    <string name="analysis_nps">%1$s nps</string>
+    <string name="analysis_nodes">%1$s 模拟</string>
     <string name="analysis_eval">评估</string>
     <string name="analysis_pv">主要变例</string>
     <string name="analysis_best_move">最佳着法</string>
@@ -104,7 +94,7 @@
     <string name="coord_error">坐标</string>
 
     <!-- 菜单补充 -->
-    <string name="menu_title">五子棋</string>
+    <string name="menu_title">围棋</string>
     <string name="menu_choose_color_title">选择执子</string>
 
     <!-- 对局补充 -->
@@ -114,31 +104,23 @@
     <string name="status_you_are">你执%1$s</string>
     <string name="stone_black">黑</string>
     <string name="stone_white">白</string>
-    <string name="game_over_black">黑棋获胜</string>
-    <string name="game_over_white">白棋获胜</string>
     <string name="action_play_again">再来一局</string>
-    <string name="action_confirm_restart">确定</string>
     <string name="action_view_board">查看棋盘</string>
-    <string name="confirm_clear_title">清空棋盘？</string>
-    <string name="confirm_clear_text">将移除全部棋子。</string>
     <string name="dialog_edit_mode">编辑模式</string>
     <string name="dialog_edit_color">编辑用子色</string>
     <string name="dialog_analysis">局面分析</string>
     <string name="dialog_back_to_menu">返回主菜单</string>
-    <string name="action_swap_sides">交换黑白</string>
     <string name="analysis_empty_hint">点击棋盘落子分析</string>
     <string name="analysis_flip">翻转黑白</string>
-    <string name="analysis_win_rate">胜率</string>
-    <string name="analysis_pv_moves">变例</string>
 
     <!-- 设置补充 -->
     <string name="settings_about_version">版本 %1$s</string>
-    <string name="settings_about_powered">Powered by Rapfi</string>
+    <string name="settings_about_powered">Powered by Pachi</string>
     <!-- 关于里的两个可点链接：显示用短地址，打开用完整 URL（均为固定值，不翻译） -->
     <string name="settings_about_repo" translatable="false">github.com/Qwara-chan/gomoku-watch</string>
     <string name="settings_about_repo_url" translatable="false">https://github.com/Qwara-chan/gomoku-watch</string>
-    <string name="settings_about_engine_url" translatable="false">https://github.com/dhbloo/rapfi</string>
-    <string name="settings_about_license">以 GPL-3.0 许可发布</string>
+    <string name="settings_about_engine_url" translatable="false">https://github.com/pasky/pachi</string>
+    <string name="settings_about_license">以 GPL-3.0 许可发布 · 引擎 GPL-2.0+</string>
     <string name="settings_about_license_url" translatable="false">https://github.com/Qwara-chan/gomoku-watch/blob/main/LICENSE</string>
     <!-- 作者署名（点按打开 GitHub 主页）；名字固定不翻译 -->
     <string name="settings_about_author">作者 %1$s</string>
