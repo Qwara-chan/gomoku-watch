@@ -284,6 +284,16 @@ fun SettingsScreen(vm: MainViewModel) {
         }
         item {
             AboutLink(
+                text = stringResource(
+                    R.string.settings_about_author,
+                    stringResource(R.string.settings_about_author_name),
+                ),
+                url = stringResource(R.string.settings_about_author_url),
+                color = CreamWhite,
+            )
+        }
+        item {
+            AboutLink(
                 text = stringResource(R.string.settings_about_license),
                 url = stringResource(R.string.settings_about_license_url),
                 color = CreamWhite.copy(alpha = 0.6f),

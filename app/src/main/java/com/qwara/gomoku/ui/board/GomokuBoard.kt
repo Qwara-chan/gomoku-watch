@@ -224,8 +224,9 @@ fun GomokuBoard(
     fun applyRotary(dy: Float) {
         // 表冠操作优先：打断可能在跑的双击缩放动画，避免两者互相抢写 viewScale
         zoomAnimJob?.cancel()
-        // 表冠向前（dy < 0）放大，向后缩小；指数形式保证任何步长都不会把系数拉到负值
-        val factor = exp(-dy * 0.10f)
+        // 表冠向后（dy > 0）放大、向前缩小（用户要求的方向；三条输入通路都汇到这里，
+        // 只在这里定符号即可保持一致）。指数形式保证任何步长都不会把系数拉到负值
+        val factor = exp(dy * 0.10f)
         viewScale = (viewScale * factor).coerceIn(MIN_SCALE, MAX_SCALE)
         pan = clampPan(pan, viewScale)
     }

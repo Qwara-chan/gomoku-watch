@@ -140,6 +140,10 @@
     <string name="settings_about_engine_url" translatable="false">https://github.com/dhbloo/rapfi</string>
     <string name="settings_about_license">以 GPL-3.0 许可发布</string>
     <string name="settings_about_license_url" translatable="false">https://github.com/Qwara-chan/gomoku-watch/blob/main/LICENSE</string>
+    <!-- 作者署名（点按打开 GitHub 主页）；名字固定不翻译 -->
+    <string name="settings_about_author">作者 %1$s</string>
+    <string name="settings_about_author_name" translatable="false">Qwara-chan</string>
+    <string name="settings_about_author_url" translatable="false">https://github.com/Qwara-chan</string>
     <string name="settings_decrease">减少</string>
     <string name="settings_increase">增加</string>
 </resources>
