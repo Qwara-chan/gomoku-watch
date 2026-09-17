@@ -6,7 +6,7 @@ package com.qwara.go.ui.theme
 import androidx.compose.runtime.Composable
 import androidx.wear.compose.material3.MaterialTheme
 
-private val GomokuColorScheme = androidx.wear.compose.material3.ColorScheme(
+private val GoColorScheme = androidx.wear.compose.material3.ColorScheme(
     primary = WoodAmber,
     primaryDim = WoodAmberDark,
     onPrimary = BlackStone,
@@ -39,6 +39,6 @@ private val GomokuColorScheme = androidx.wear.compose.material3.ColorScheme(
 )
 
 @Composable
-fun GomokuTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = GomokuColorScheme, content = content)
+fun GoTheme(content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = GoColorScheme, content = content)
 }

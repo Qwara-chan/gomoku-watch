@@ -18,7 +18,7 @@ import com.qwara.go.ui.screens.AnalysisScreen
 import com.qwara.go.ui.screens.GameScreen
 import com.qwara.go.ui.screens.MenuScreen
 import com.qwara.go.ui.screens.SettingsScreen
-import com.qwara.go.ui.theme.GomokuTheme
+import com.qwara.go.ui.theme.GoTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -33,15 +33,15 @@ class MainActivity : ComponentActivity() {
             override fun onStop(owner: LifecycleOwner) = vm.onHostStopped()
         })
         setContent {
-            GomokuTheme {
-                GomokuRoot(vm)
+            GoTheme {
+                GoRoot(vm)
             }
         }
     }
 }
 
 @Composable
-fun GomokuRoot(vm: MainViewModel = viewModel()) {
+fun GoRoot(vm: MainViewModel = viewModel()) {
     val screen by vm.screen.collectAsStateWithLifecycle()
     when (screen) {
         Screen.MENU -> MenuScreen(vm)

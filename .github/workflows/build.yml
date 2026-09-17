@@ -129,21 +129,21 @@ jobs:
         # ① release 包必须合并了应用自有的 AOT baseline profile 规则（来自
         #    app/src/main/baseline-prof.txt + proguard 的 -keepnames；被移除或失效时
         #    规则数会从 ~1400 掉到 ~20，只剩 androidx 库自带的部分）。
-        # ② arm64 librapfi.so 必须是仓库提交的 PGO+ThinLTO 优化版（见 AGENTS.md 的重建
-        #    配方）。用原版或其他构建覆盖提交时会因尺寸不同而失败；
+        # ② arm64/v7a libpachi.so 必须是仓库提交的交叉编译版（见 engine-src/README.md
+        #    的重建配方）。用其他构建覆盖提交时会因尺寸不同而失败；
         #    本地重编引擎后记得同步更新这里的预期字节数。
         # ③ 发布路径上（有 tag）：包内报告的版本必须等于 tag 推出的版本，防止发出名不对版的包。
         env:
           EXPECTED_VERSION: ${{ steps.version.outputs.app_version_name }}
         run: |
           RELEASE_APK=$(ls app/build/outputs/apk/release/*universal*release*.apk)
-          RULES=$(grep -c "qwara/gomoku" app/build/intermediates/combined_art_profile/release/compileReleaseArtProfile/baseline-prof.txt || true)
-          LIB=$(unzip -l "$RELEASE_APK" | awk '/arm64-v8a\/librapfi.so/{print $1}')
-          LIB7=$(unzip -l "$RELEASE_APK" | awk '/armeabi-v7a\/librapfi.so/{print $1}')
-          echo "app profile rules=$RULES, arm64 librapfi.so bytes=$LIB, v7a bytes=$LIB7"
+          RULES=$(grep -c "qwara/go" app/build/intermediates/combined_art_profile/release/compileReleaseArtProfile/baseline-prof.txt || true)
+          LIB=$(unzip -l "$RELEASE_APK" | awk '/arm64-v8a\/libpachi.so/{print $1}')
+          LIB7=$(unzip -l "$RELEASE_APK" | awk '/armeabi-v7a\/libpachi.so/{print $1}')
+          echo "app profile rules=$RULES, arm64 libpachi.so bytes=$LIB, v7a bytes=$LIB7"
           test "${RULES:-0}" -ge 1000 || { echo "::error::release APK 的 baseline profile 缺少应用自有规则（预期 ≥1000）"; exit 1; }
-          test "$LIB" = "2487912" || { echo "::error::arm64 librapfi.so 不是提交的 PGO+ThinLTO 优化版（预期 2487912 字节）"; exit 1; }
-          test "$LIB7" = "1853696" || { echo "::error::armeabi-v7a librapfi.so 不是提交的 NEON+PGO 优化版（预期 1853696 字节）"; exit 1; }
+          test "$LIB" = "467584" || { echo "::error::arm64 libpachi.so 与仓库提交版本不一致（预期 467584 字节）"; exit 1; }
+          test "$LIB7" = "436916" || { echo "::error::armeabi-v7a libpachi.so 与仓库提交版本不一致（预期 436916 字节）"; exit 1; }
           if [ -n "$EXPECTED_VERSION" ]; then
             # 直接读 APK 清单（而不是 AGP 的 output-metadata.json），验的就是真正发出去的那个包
             AAPT2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | tail -1)
