@@ -15,6 +15,7 @@ cd "$(dirname "$0")"
 
 SRC=pachi-src
 OUT=build-host
+mkdir -p "$OUT"
 JNI_DIR="$(dirname "$(find /usr/lib/jvm -name jni.h -print -quit)")"
 
 [ -d "$SRC" ] || { echo "pachi-src/ missing — see README.md"; exit 1; }
