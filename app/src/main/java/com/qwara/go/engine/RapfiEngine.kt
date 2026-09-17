@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.engine
+package com.qwara.go.engine
 
 import android.content.Context
 import android.util.Log
-import com.qwara.gomoku.game.Board
-import com.qwara.gomoku.game.Rule
+import com.qwara.go.game.Board
+import com.qwara.go.game.Rule
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

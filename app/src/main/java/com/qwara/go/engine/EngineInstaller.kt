@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.engine
+package com.qwara.go.engine
 
 import android.content.Context
 import android.content.res.AssetManager

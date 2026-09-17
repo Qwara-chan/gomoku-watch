@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.ui.board
+package com.qwara.go.ui.board
 
 import android.util.Log
 import android.view.InputDevice
@@ -56,21 +56,21 @@ import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.requestFocusOnHierarchyActive
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
-import com.qwara.gomoku.GameMode
-import com.qwara.gomoku.GameUiState
-import com.qwara.gomoku.engine.EngineStatus
-import com.qwara.gomoku.game.Board
-import com.qwara.gomoku.game.RenjuRules
-import com.qwara.gomoku.ui.components.CircleIconButton
-import com.qwara.gomoku.ui.theme.BlackStone
-import com.qwara.gomoku.ui.theme.CreamWhite
-import com.qwara.gomoku.ui.theme.ErrorRed
-import com.qwara.gomoku.ui.theme.HintGreen
-import com.qwara.gomoku.ui.theme.PanelDark
-import com.qwara.gomoku.ui.theme.WoodAmber
-import com.qwara.gomoku.ui.theme.WoodBrown
-import com.qwara.gomoku.ui.theme.WoodBrownEdge
-import com.qwara.gomoku.ui.theme.WoodBrownLight
+import com.qwara.go.GameMode
+import com.qwara.go.GameUiState
+import com.qwara.go.engine.EngineStatus
+import com.qwara.go.game.Board
+import com.qwara.go.game.RenjuRules
+import com.qwara.go.ui.components.CircleIconButton
+import com.qwara.go.ui.theme.BlackStone
+import com.qwara.go.ui.theme.CreamWhite
+import com.qwara.go.ui.theme.ErrorRed
+import com.qwara.go.ui.theme.HintGreen
+import com.qwara.go.ui.theme.PanelDark
+import com.qwara.go.ui.theme.WoodAmber
+import com.qwara.go.ui.theme.WoodBrown
+import com.qwara.go.ui.theme.WoodBrownEdge
+import com.qwara.go.ui.theme.WoodBrownLight
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.hypot

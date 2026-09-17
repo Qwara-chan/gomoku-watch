@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.ui.components
+package com.qwara.go.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -29,10 +29,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material3.Icon
-import com.qwara.gomoku.ui.theme.BlackStone
-import com.qwara.gomoku.ui.theme.CreamWhite
-import com.qwara.gomoku.ui.theme.PanelDark
-import com.qwara.gomoku.ui.theme.WoodAmber
+import com.qwara.go.ui.theme.BlackStone
+import com.qwara.go.ui.theme.CreamWhite
+import com.qwara.go.ui.theme.PanelDark
+import com.qwara.go.ui.theme.WoodAmber
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.roundToInt

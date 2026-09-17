@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.ui.screens
+package com.qwara.go.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -34,12 +34,12 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.qwara.gomoku.MainViewModel
-import com.qwara.gomoku.R
-import com.qwara.gomoku.game.Board
-import com.qwara.gomoku.ui.components.ChoiceButton
-import com.qwara.gomoku.ui.components.WideButton
-import com.qwara.gomoku.ui.theme.WoodAmber
+import com.qwara.go.MainViewModel
+import com.qwara.go.R
+import com.qwara.go.game.Board
+import com.qwara.go.ui.components.ChoiceButton
+import com.qwara.go.ui.components.WideButton
+import com.qwara.go.ui.theme.WoodAmber
 
 @Composable
 fun MenuScreen(vm: MainViewModel) {

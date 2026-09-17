@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.game
+package com.qwara.go.game
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

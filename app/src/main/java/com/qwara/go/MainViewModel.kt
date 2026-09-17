@@ -1,20 +1,20 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku
+package com.qwara.go
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.qwara.gomoku.data.SettingsRepository
-import com.qwara.gomoku.engine.EngineStatus
-import com.qwara.gomoku.engine.EngineValue
-import com.qwara.gomoku.engine.PvLine
-import com.qwara.gomoku.engine.RapfiEngine
-import com.qwara.gomoku.game.Board
-import com.qwara.gomoku.game.RenjuRules
-import com.qwara.gomoku.game.Rule
-import com.qwara.gomoku.ui.util.FeedbackHelper
+import com.qwara.go.data.SettingsRepository
+import com.qwara.go.engine.EngineStatus
+import com.qwara.go.engine.EngineValue
+import com.qwara.go.engine.PvLine
+import com.qwara.go.engine.RapfiEngine
+import com.qwara.go.game.Board
+import com.qwara.go.game.RenjuRules
+import com.qwara.go.game.Rule
+import com.qwara.go.ui.util.FeedbackHelper
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 import kotlinx.coroutines.Job

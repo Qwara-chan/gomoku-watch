@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.ui.board
+package com.qwara.go.ui.board
 
 /**
  * 圆屏下的棋盘视图几何（纯函数，无 Android 依赖，便于单测）。

@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.data
+package com.qwara.go.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.qwara.gomoku.game.Rule
+import com.qwara.go.game.Rule
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.abs

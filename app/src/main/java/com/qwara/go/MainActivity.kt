@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku
+package com.qwara.go
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -14,11 +14,11 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.qwara.gomoku.ui.screens.AnalysisScreen
-import com.qwara.gomoku.ui.screens.GameScreen
-import com.qwara.gomoku.ui.screens.MenuScreen
-import com.qwara.gomoku.ui.screens.SettingsScreen
-import com.qwara.gomoku.ui.theme.GomokuTheme
+import com.qwara.go.ui.screens.AnalysisScreen
+import com.qwara.go.ui.screens.GameScreen
+import com.qwara.go.ui.screens.MenuScreen
+import com.qwara.go.ui.screens.SettingsScreen
+import com.qwara.go.ui.theme.GomokuTheme
 
 class MainActivity : ComponentActivity() {
 

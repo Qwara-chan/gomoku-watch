@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.ui.screens
+package com.qwara.go.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -45,26 +45,26 @@ import androidx.wear.compose.material3.FilledTonalButton
 import androidx.wear.compose.material3.SwitchButton
 import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TextButton
-import com.qwara.gomoku.GameMode
-import com.qwara.gomoku.GameOver
-import com.qwara.gomoku.GameUiState
-import com.qwara.gomoku.MainViewModel
-import com.qwara.gomoku.R
-import com.qwara.gomoku.engine.EngineStatus
-import com.qwara.gomoku.engine.EngineValue
-import com.qwara.gomoku.game.Board
-import com.qwara.gomoku.ui.board.GomokuBoard
-import com.qwara.gomoku.ui.components.BottomArcButtons
-import com.qwara.gomoku.ui.components.ChoiceButton
-import com.qwara.gomoku.ui.components.ChromeVisibility
-import com.qwara.gomoku.ui.components.CircleIconButton
-import com.qwara.gomoku.ui.components.EdgeCapsule
-import com.qwara.gomoku.ui.components.EvalCurvePanel
-import com.qwara.gomoku.ui.theme.BlackStone
-import com.qwara.gomoku.ui.theme.CreamWhite
-import com.qwara.gomoku.ui.theme.DeepBlack
-import com.qwara.gomoku.ui.theme.PanelDark
-import com.qwara.gomoku.ui.theme.WoodAmber
+import com.qwara.go.GameMode
+import com.qwara.go.GameOver
+import com.qwara.go.GameUiState
+import com.qwara.go.MainViewModel
+import com.qwara.go.R
+import com.qwara.go.engine.EngineStatus
+import com.qwara.go.engine.EngineValue
+import com.qwara.go.game.Board
+import com.qwara.go.ui.board.GomokuBoard
+import com.qwara.go.ui.components.BottomArcButtons
+import com.qwara.go.ui.components.ChoiceButton
+import com.qwara.go.ui.components.ChromeVisibility
+import com.qwara.go.ui.components.CircleIconButton
+import com.qwara.go.ui.components.EdgeCapsule
+import com.qwara.go.ui.components.EvalCurvePanel
+import com.qwara.go.ui.theme.BlackStone
+import com.qwara.go.ui.theme.CreamWhite
+import com.qwara.go.ui.theme.DeepBlack
+import com.qwara.go.ui.theme.PanelDark
+import com.qwara.go.ui.theme.WoodAmber
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch

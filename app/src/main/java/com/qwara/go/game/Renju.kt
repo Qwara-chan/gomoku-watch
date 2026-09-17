@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.game
+package com.qwara.go.game
 
 /**
  * 连珠（Renju）规则禁手判定：黑棋的三三、四四、长连禁手；白棋无禁手。

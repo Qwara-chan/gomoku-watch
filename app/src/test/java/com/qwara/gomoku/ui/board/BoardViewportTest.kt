@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.ui.board
+package com.qwara.go.ui.board
 
 import org.junit.Assert.assertTrue
 import org.junit.Test

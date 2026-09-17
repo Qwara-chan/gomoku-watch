@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.ui.components
+package com.qwara.go.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -19,10 +19,10 @@ import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.Icon
 import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TextButton
-import com.qwara.gomoku.ui.theme.BlackStone
-import com.qwara.gomoku.ui.theme.CreamWhite
-import com.qwara.gomoku.ui.theme.PanelDark
-import com.qwara.gomoku.ui.theme.WoodAmber
+import com.qwara.go.ui.theme.BlackStone
+import com.qwara.go.ui.theme.CreamWhite
+import com.qwara.go.ui.theme.PanelDark
+import com.qwara.go.ui.theme.WoodAmber
 
 /** 铺满宽度的菜单项按钮，左侧图标 + 标题（+ 可选副标题）。 */
 @Composable

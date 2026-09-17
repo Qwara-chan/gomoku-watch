@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.ui.components
+package com.qwara.go.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -36,12 +36,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material3.Text
-import com.qwara.gomoku.R
-import com.qwara.gomoku.ui.theme.CreamWhite
-import com.qwara.gomoku.ui.theme.HintGreen
-import com.qwara.gomoku.ui.theme.OutlineGray
-import com.qwara.gomoku.ui.theme.PanelDark
-import com.qwara.gomoku.ui.theme.WoodAmber
+import com.qwara.go.R
+import com.qwara.go.ui.theme.CreamWhite
+import com.qwara.go.ui.theme.HintGreen
+import com.qwara.go.ui.theme.OutlineGray
+import com.qwara.go.ui.theme.PanelDark
+import com.qwara.go.ui.theme.WoodAmber
 import kotlin.math.roundToInt
 
 /**

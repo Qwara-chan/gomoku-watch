@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.ui.screens
+package com.qwara.go.ui.screens
 
 import android.content.pm.PackageManager
 import android.os.Build
@@ -40,13 +40,13 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.material3.IconButton
 import androidx.wear.compose.material3.SwitchButton
 import androidx.wear.compose.material3.Text
-import com.qwara.gomoku.MainViewModel
-import com.qwara.gomoku.R
-import com.qwara.gomoku.data.SettingsRepository
-import com.qwara.gomoku.game.Rule
-import com.qwara.gomoku.ui.components.ChoiceButton
-import com.qwara.gomoku.ui.theme.CreamWhite
-import com.qwara.gomoku.ui.theme.WoodAmber
+import com.qwara.go.MainViewModel
+import com.qwara.go.R
+import com.qwara.go.data.SettingsRepository
+import com.qwara.go.game.Rule
+import com.qwara.go.ui.components.ChoiceButton
+import com.qwara.go.ui.theme.CreamWhite
+import com.qwara.go.ui.theme.WoodAmber
 
 private const val MIN_ENGINE_SEC = 1
 private const val MAX_ENGINE_SEC = 10

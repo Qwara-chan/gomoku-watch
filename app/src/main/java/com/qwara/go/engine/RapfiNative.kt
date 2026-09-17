@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.engine
+package com.qwara.go.engine
 
 /**
  * Rapfi 引擎 JNI 桥。librapfi.so 在 App 进程内以独立线程运行 Piskvork 协议循环，

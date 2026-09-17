@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Qwara-chan
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package com.qwara.gomoku.game
+package com.qwara.go.game
 
 /**
  * 五子棋棋盘核心逻辑：纯 Kotlin，无 Android 依赖。
