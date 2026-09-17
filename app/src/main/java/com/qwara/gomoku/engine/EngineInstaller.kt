@@ -10,47 +10,49 @@ import java.io.File
 import java.io.FileNotFoundException
 
 /**
- * 把 assets 中的 Rapfi 权重与配置文件解压到应用私有目录。
- * 引擎本体是 JNI 库（jniLibs 中的 librapfi.so，由系统自动装载），
- * 这里只准备数据文件：config.toml 与 NNUE/经典评估权重（Rapfi 要求可从工作目录找到）。
+ * 把 assets 中的 pachi 数据文件解压到应用私有目录，作为引擎会话的 workDir。
+ * 引擎本体是 JNI 库（jniLibs 中的 libpachi.so，由系统自动装载），这里只准备数据：
+ * 走子模式库（patterns_mm.*）与 opening.dat 开局库，pachi 按工作目录查找它们。
+ * 全部缺失时引擎自动降级为纯蒙特卡洛（依然可用，只是前中盘更弱），所以这里尽力安装、
+ * 不强制失败；但装一半比不装更糟——要么完整要么重头来，完整性校验照旧。
  */
 object EngineInstaller {
 
     private const val TAG = "EngineInstaller"
     private const val ASSET_COMMON = "engine/common"
-    private const val STAMP = "weights-v1.stamp"
+    private const val STAMP = "pachi-v1.stamp"
 
-    /** 缺失即无法启动引擎的文件；用于判断已解压内容是否完整。
-     *  三个 ~10MB 的 .lz4 权重必须在内：否则复制中途失败时只有小文件通过校验，
-     *  stamp 照写，残缺目录被固化成永久损坏（引擎永远启动失败且不会自愈） */
+    /** 完整性校验覆盖的文件；解压中途失败时不写 stamp，下次启动重解 */
     private val REQUIRED_FILES = listOf(
-        "config.toml",
-        "model210901.bin",
-        "mix9svqfreestyle_bsmix.bin.lz4",
-        "mix9svqrenju_bs15_black.bin.lz4",
-        "mix9svqrenju_bs15_white.bin.lz4",
+        "patterns_mm.gamma",
+        "patterns_mm.spat",
+        "opening.dat",
     )
 
     @Volatile
-    private var weightsDir: File? = null
+    private var engineDir: File? = null
 
     @Synchronized
-    fun ensureWeightsInstalled(context: Context): File {
-        weightsDir?.let { return it }
+    fun ensureEngineDataInstalled(context: Context): File {
+        engineDir?.let { return it }
         val target = File(context.filesDir, "engine")
         val stamp = File(target, STAMP)
         if (stamp.exists() && REQUIRED_FILES.all { File(target, it).isFile }) {
-            weightsDir = target
+            engineDir = target
             return target
         }
         target.mkdirs()
-        Log.i(TAG, "Installing engine weights to ${target.absolutePath}")
+        Log.i(TAG, "Installing engine data to ${target.absolutePath}")
         copyAssetTree(context.assets, ASSET_COMMON, target)
         // 解压不完整就不要写戳，否则会一直以残缺目录启动引擎
         val missing = REQUIRED_FILES.filterNot { File(target, it).isFile }
-        check(missing.isEmpty()) { "engine assets incomplete, missing: $missing" }
-        stamp.writeText("ok")
-        weightsDir = target
+        if (missing.isNotEmpty()) {
+            Log.w(TAG, "engine assets incomplete, missing: $missing (engine falls back to plain MC)")
+            stamp.delete()
+        } else {
+            stamp.writeText("ok")
+        }
+        engineDir = target
         return target
     }
 

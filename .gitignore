@@ -16,3 +16,5 @@ Rapfi-src/
 rapfi-networks/
 .zcode/
 pachi-src/
+engine-src/build-android/
+engine-src/build-host/

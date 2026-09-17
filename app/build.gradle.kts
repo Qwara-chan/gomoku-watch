@@ -70,16 +70,12 @@ android {
     buildFeatures {
         compose = true
     }
-    // 引擎可执行文件禁止压缩，确保可直接提取执行
-    androidResources {
-        noCompress += listOf("bin")
-    }
+    // 引擎数据文件已按 AGENTS.md 配方用 llvm-strip --strip-debug 处理过；
+    // 禁止 AGP 用各机器版本不一的 strip 再削一层，保证 APK 内与提交字节一致
+    // （CI 的优化产物校验按字节数核对此文件）
     packaging {
         jniLibs {
-            // librapfi.so 已按 AGENTS.md 配方用 llvm-strip --strip-debug 处理过；
-            // 禁止 AGP 用各机器版本不一的 strip 再削一层，保证 APK 内与提交字节一致
-            // （CI 的优化产物校验按字节数核对此文件）
-            keepDebugSymbols += "**/librapfi.so"
+            keepDebugSymbols += "**/libpachi.so"
         }
     }
     // 按产物细分 ABI：arm64-v8a / armeabi-v7a / x86_64 各出一个独立 APK，
