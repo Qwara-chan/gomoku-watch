@@ -84,11 +84,14 @@
 
     <!-- 确认 -->
     <string name="confirm_leave_title">离开对局？</string>
-    <string name="confirm_leave_text">当前对局进度将丢失。</string>
+    <!-- 离开对局并不清盘：主菜单会出现「继续对局」，所以文案不能写"进度将丢失" -->
+    <string name="confirm_leave_text">局面会保留，可从主菜单「继续对局」回来。</string>
     <string name="confirm_yes">离开</string>
     <string name="confirm_no">继续</string>
     <string name="confirm_restart_title">重新开始？</string>
     <string name="confirm_restart_text">将清空当前棋盘。</string>
+    <string name="confirm_restart_yes">重新开始</string>
+    <string name="confirm_restart_no">取消</string>
 
     <!-- 坐标 -->
     <string name="coord_error">坐标</string>

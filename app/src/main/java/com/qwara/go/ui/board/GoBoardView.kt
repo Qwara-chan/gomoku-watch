@@ -305,6 +305,8 @@ fun GoBoardView(
                     awaitPointerEventScope {
                         val slop = viewConfiguration.touchSlop
                         var lastTapAt = 0L
+                        var lastTapX = -1
+                        var lastTapY = -1
                         while (true) {
                             // 等待按下
                             val press = awaitPointerEvent()
@@ -387,9 +389,12 @@ fun GoBoardView(
                             // 避免"看着点在这里却落在旁边交叉点"的错位感
                             val threshold = cell * (0.55f + 0.25f * (viewScale - 1f).coerceIn(0f, 1f))
                             if (dist > threshold) continue
-                            // 双击已有棋子处：缩放视图（单手替代捏合）；空点上的连续两次点击按两次落子处理
+                            // 双击同一交叉点上的棋子：缩放视图（单手替代捏合）；
+                            // 空点上的连续两次点击按两次落子处理。
+                            // 必须比对交叉点：只比时间的话，快速点两处不同的棋子也会触发缩放
                             val now = android.os.SystemClock.uptimeMillis()
-                            val doubleTap = now - lastTapAt < 300 &&
+                            val sameSpot = gx == lastTapX && gy == lastTapY
+                            val doubleTap = sameSpot && now - lastTapAt < 300 &&
                                 latestState.colorAt(gx, gy) != GoBoard.Color.EMPTY
                             if (doubleTap) {
                                 lastTapAt = 0
@@ -401,6 +406,8 @@ fun GoBoardView(
                                 }
                             } else {
                                 lastTapAt = now
+                                lastTapX = gx
+                                lastTapY = gy
                                 onTap(gx, gy)
                             }
                         }
@@ -545,11 +552,13 @@ fun GoBoardView(
                 }
 
                 // 手数序号：画在棋子上（黑子米白字 / 白子墨黑字），随视图缩放一起放大
+                // 只画还在盘上的棋子：被提掉的着法仍在 visibleMoves 里，跟着画会在空点上留下幽灵序号
                 val shownMoves = state.visibleMoves
                 if (state.showMoveNumbers) {
                     val style = if (shownMoves.size >= 100) moveNumberCompactStyle else moveNumberStyle
                     shownMoves.forEachIndexed { i, m ->
                         if (m.x !in 0 until size || m.y !in 0 until size) return@forEachIndexed
+                        if (state.colorAt(m.x, m.y) != m.color) return@forEachIndexed
                         val color = if (m.color == GoBoard.Color.BLACK) CreamWhite else BlackStone
                         val layout = textCache.layout((i + 1).toString(), color, style)
                         val cx = left + pad + m.x * cell

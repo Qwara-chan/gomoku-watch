@@ -119,6 +119,11 @@ fun GameScreen(vm: MainViewModel) {
         }
     }
 
+    // 终局遮罩还遮着时强制收起悬浮控件：终局后的引擎回包会再 poke 一次，
+    // 只靠 chromeVisible 会让过期的"黑棋行棋"胶囊在遮罩下重新浮现。
+    // 判断依据是「遮罩是否遮着」而不是「是否终局」——点了「查看棋盘」之后仍要能唤出菜单
+    val overlayShowing = state.gameOver != null && !overlayDismissed
+
     BackHandler {
         if (state.moves.isNotEmpty() && state.gameOver == null) {
             showLeaveConfirm = true
@@ -141,7 +146,7 @@ fun GameScreen(vm: MainViewModel) {
 
         // 顶部状态胶囊 + 返回钮（整体居中，下移避开圆屏弧顶最窄处）
         ChromeVisibility(
-            visible = chromeVisible,
+            visible = chromeVisible && !overlayShowing,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 20.dp),
@@ -204,7 +209,7 @@ fun GameScreen(vm: MainViewModel) {
 
         // 底部弧线按钮（圆心均布在屏圆周同心圆上，贴合边缘）
         ChromeVisibility(
-            visible = chromeVisible,
+            visible = chromeVisible && !overlayShowing,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxSize(),
@@ -275,8 +280,9 @@ fun GameScreen(vm: MainViewModel) {
         ConfirmDialog(
             title = stringResource(R.string.confirm_restart_title),
             text = stringResource(R.string.confirm_restart_text),
-            confirmText = stringResource(R.string.confirm_yes),
-            dismissText = stringResource(R.string.confirm_no),
+            // 重新开始用自己的一套文案：复用"离开/继续"会让确认键写着"离开"
+            confirmText = stringResource(R.string.confirm_restart_yes),
+            dismissText = stringResource(R.string.confirm_restart_no),
             onConfirm = {
                 showRestartConfirm = false
                 vm.restart()

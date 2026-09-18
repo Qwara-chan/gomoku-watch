@@ -30,8 +30,11 @@ enum class Screen { MENU, GAME, ANALYSIS, SETTINGS }
 
 enum class GameMode { TWO_PLAYER, AI, ANALYSIS }
 
-/** 全谱分析每手思考时长（毫秒） */
-private const val SCAN_TIME_MS = 600
+/** 全谱分析每手的最长等待：等到引擎第一次候选上报就停（pachi 首帧要 0.5~1.2 秒） */
+private const val SCAN_MAX_WAIT_MS = 3000
+
+/** 「提示」的分析时长：够引擎积累几帧候选，同时让分析自己结束（见 hint()） */
+private const val HINT_ANALYZE_MS = 2000
 
 /**
  * 搜索中段 PV 状态推送的最小间隔。引擎每次上报都是一次全量 GameUiState 拷贝 +
@@ -181,7 +184,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 lastPush = TimeSource.Monotonic.markNow()
                 val idle = st.phase == EngineStatus.Phase.IDLE
-                val pendingHint = hintActive && idle && st.bestMoves.isNotEmpty()
+                // 提示点：lz-analyze 不像 lz-genmove_analyze 那样给最终着法行（"play x"），
+                // 首选点只能从主变例首项取
+                val hintPoint = st.bestMoves.firstOrNull()?.takeIf { it.first >= 0 }
+                    ?: st.pvLines.firstOrNull()?.moves?.firstOrNull()
+                val pendingHint = hintActive && idle && hintPoint != null
                 if (hintActive && idle) hintActive = false
                 _ui.update { ui ->
                     // 曲线记录并入同一次状态更新，避免每路 PV 触发两次全量拷贝
@@ -198,7 +205,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         enginePhase = st.phase,
                         pvLines = st.pvLines,
                         bestMoves = st.bestMoves.filter { it.first >= 0 },
-                        hint = if (pendingHint) st.bestMoves.first().takeIf { it.first >= 0 } else ui.hint,
+                        hint = if (pendingHint) hintPoint else ui.hint,
                         engineThinking = aiMoveInFlight || st.phase == EngineStatus.Phase.THINKING,
                         curve = curve,
                     )
@@ -344,7 +351,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             showMessage("已回到当前局面")
             return
         }
-        if (s.mode == GameMode.AI && s.enginePhase == EngineStatus.Phase.ANALYZING) return
         if (s.gameOver != null) return
         if (!board.inBounds(x, y)) return
 
@@ -384,7 +390,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (s.gameOver != null) return
-        if (s.mode == GameMode.AI && s.enginePhase == EngineStatus.Phase.ANALYZING) return
         val color = if (s.editMode) s.editColor else s.sideToMove
         doPass(color, fromEngine = false)
     }
@@ -417,6 +422,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         feedback.vibrate(_ui.value.vibrate, 80)
         viewModelScope.launch {
             if (!ensureEngine()) return@launch
+            // 会话若是刚重建的，引擎盘面还是空的（startNewGame 只 clear_board、不重放），
+            // 数子前必须把终局盘面（含两手 pass）推过去
+            engine.syncBoard(board.moves.toList())
             engine.finalScore()
                 .onSuccess { eng ->
                     // 引擎数子（"B+3.5"/"W+12"/"0"）比本地权威
@@ -494,6 +502,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val timeMs = s.engineTimeSec * 1000
         val timeout = timeMs * 4L + 8000
         viewModelScope.launch {
+            // 会话可能还没开或已被设置改动作废（路数/贴目变了要重建）：
+            // 应着前确认一次，重建后整盘重放会立刻把盘面推回去，不会漂移
+            if (!ensureEngine()) return@launch
             val mv = withAiMoveInFlight {
                 withTimeoutOrNull(timeout) { engine.playUserMove(position, timeMs) }
                     ?: Result.failure(PachiEngine.EngineException("引擎超时"))
@@ -605,7 +616,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             hintActive = true
-            engine.syncAndAnalyze(board.moves.toList(), 2000)
+            // 必须限时自己停：pachi 的 lz-analyze 是无限分析，不主动停相位就永远停在
+            // ANALYZING（提示圈等的是 IDLE），人机对战里还会把落子闸门一直关着
+            engine.analyzeFor(board.moves.toList(), HINT_ANALYZE_MS)
         }
     }
 
@@ -652,7 +665,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
 
-    /** 全谱分析：逐手限时搜索，生成整局评估曲线；用 [cancelFullScan] 中断 */
+    /** 全谱分析：逐手分析（每手等到引擎第一次上报就停），生成整局评估曲线；用 [cancelFullScan] 中断 */
     fun startFullScan() {
         val s = _ui.value
         if (engineThinkingNow() || scanJob != null || s.viewPly != null) return
@@ -673,7 +686,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         showMessage("引擎无响应，分析中断")
                         break
                     }
-                    engine.scanAnalyze(moves.take(k), SCAN_TIME_MS)
+                    engine.scanAnalyze(moves.take(k), SCAN_MAX_WAIT_MS)
                     val wr = engine.status.value.pvLines.firstOrNull()?.winRate
                     if (wr != null && !wr.isNaN()) history[k] = EngineValue.blackWinRate(wr, k)
                     _ui.update {

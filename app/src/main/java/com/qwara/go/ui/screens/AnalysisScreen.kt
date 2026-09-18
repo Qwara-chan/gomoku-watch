@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.wear.compose.material3.Text
 import com.qwara.go.GameUiState
@@ -47,6 +48,7 @@ import com.qwara.go.MainViewModel
 import com.qwara.go.R
 import com.qwara.go.engine.EngineStatus
 import com.qwara.go.engine.PvLine
+import com.qwara.go.game.GoBoard
 import com.qwara.go.ui.board.GoBoardView
 import com.qwara.go.ui.components.BottomArcButtons
 import com.qwara.go.ui.components.CircleIconButton
@@ -101,6 +103,10 @@ fun AnalysisScreen(vm: MainViewModel) {
                 CircleIconButton(
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                     onClick = vm::backFromAnalysis,
+                    // 返回钮与胜率胶囊相邻，两者的 48dp 触摸区在交界处重叠；
+                    // 胶囊在 Row 里靠后、默认赢下重叠区，会把"返回"的边角变成展开曲线面板。
+                    // 抬一级 zIndex，让视觉上更靠左的返回钮在自己那一侧优先
+                    modifier = Modifier.zIndex(1f),
                     size = 28.dp,
                 )
                 Spacer(Modifier.width(4.dp))
@@ -217,7 +223,14 @@ private fun MiniEvalContent(state: GameUiState, pv: PvLine?) {
     val winRate = if (ply != null) (state.curve[ply] ?: Float.NaN) else (pv?.winRate ?: Float.NaN)
     val fraction = if (winRate.isNaN()) 0f else winRate.coerceIn(0f, 1f)
     val best = if (reviewing) null else pv?.moves?.firstOrNull()
-    val label = if (winRate.isNaN()) "—" else "${(fraction * 100).toInt()}%"
+    // 胜率口径：实时分析给的是**行棋方**胜率，而曲线/曲线面板给的是黑方胜率。
+    // 直接在读数前标出属于哪一方，免得轮白时两处数字看起来互相矛盾
+    val owner = if (reviewing || state.sideToMove == GoBoard.Color.BLACK) {
+        stringResource(R.string.stone_black)
+    } else {
+        stringResource(R.string.stone_white)
+    }
+    val label = if (winRate.isNaN()) "—" else "$owner${(fraction * 100).toInt()}%"
     Text(
         text = stringResource(R.string.analysis_eval),
         color = CreamWhite.copy(alpha = 0.8f),
