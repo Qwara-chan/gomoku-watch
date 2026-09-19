@@ -35,3 +35,14 @@ object EngineValue {
     fun blackWinRate(winRate: Float, ply: Int): Float =
         if (ply % 2 == 0) winRate else 1f - winRate
 }
+
+/**
+ * 提示点选取。lz-analyze 不像 lz-genmove_analyze 那样给最终着法行（"play x"），
+ * 首选点只能从主变例（order 最小的一路）首项取；[EngineStatus.bestMoves] 只有 genmove 路径会填，
+ * 留作兜底。pass/resign 用负坐标哨兵表示，必须剔除。
+ */
+object HintPoint {
+    fun choose(bestMoves: List<Pt>, pvLines: List<PvLine>): Pt? =
+        bestMoves.firstOrNull { it.first >= 0 }
+            ?: pvLines.minByOrNull { it.index }?.moves?.firstOrNull { it.first >= 0 }
+}

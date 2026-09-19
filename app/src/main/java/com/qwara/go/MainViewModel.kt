@@ -4,17 +4,21 @@
 package com.qwara.go
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.qwara.go.data.SettingsRepository
 import com.qwara.go.engine.EngineStatus
 import com.qwara.go.engine.EngineValue
+import com.qwara.go.engine.HintPoint
 import com.qwara.go.engine.PachiEngine
 import com.qwara.go.engine.PvLine
+import com.qwara.go.engine.ScanBudget
 import com.qwara.go.game.GoBoard
 import com.qwara.go.ui.util.FeedbackHelper
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -30,11 +34,15 @@ enum class Screen { MENU, GAME, ANALYSIS, SETTINGS }
 
 enum class GameMode { TWO_PLAYER, AI, ANALYSIS }
 
-/** 全谱分析每手的最长等待：等到引擎第一次候选上报就停（pachi 首帧要 0.5~1.2 秒） */
-private const val SCAN_MAX_WAIT_MS = 3000
+/**
+ * 「提示」等待引擎第一帧候选上报的上限。pachi 要等某个点攒够 500 次模拟才吐第一行，
+ * 首帧延迟由设备算力决定（宿主 0.6s / 模拟器 1.1s / 手表更慢），所以这里只当兜底上限——
+ * 数据一到就停，放宽不会拖慢正常情况，但慢设备上不会再「点了没反应」。
+ */
+private const val HINT_FIRST_REPORT_MS = 15000
 
-/** 「提示」的分析时长：够引擎积累几帧候选，同时让分析自己结束（见 hint()） */
-private const val HINT_ANALYZE_MS = 2000
+/** 提示在首帧之后再留一会儿：首帧只有 ~500 次模拟，首选点还很不稳 */
+private const val HINT_EXTRA_MS = 1000
 
 /**
  * 搜索中段 PV 状态推送的最小间隔。引擎每次上报都是一次全量 GameUiState 拷贝 +
@@ -60,6 +68,10 @@ data class GameUiState(
     val pvLines: List<PvLine> = emptyList(),
     val bestMoves: List<Pair<Int, Int>> = emptyList(),
     val hint: Pair<Int, Int>? = null,
+    /** 提示的引擎分析在途（状态胶囊显示「提示分析中…」，让点按立刻有反馈） */
+    val hintBusy: Boolean = false,
+    /** 提示圈脉冲代号：同一个点再次提示也要重新呼吸，所以脉冲以它为键 */
+    val hintNonce: Int = 0,
     /** 复盘浏览：非空时棋盘显示前 N 手的局面（null = 当前局面） */
     val viewPly: Int? = null,
     /** 评估曲线：手数 → 黑方胜率（0..1） */
@@ -111,14 +123,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _ui = MutableStateFlow(GameUiState())
     val ui: StateFlow<GameUiState> = _ui
 
-    private var hintActive = false
     private var messageJob: Job? = null
+
+    /** 在途的提示分析；非空表示「提示分析中」，再点一次＝取消 */
+    private var hintJob: Job? = null
 
     /** 本地下达的引擎请求是否在途（应着请求/全谱扫描，仅主线程访问） */
     private var aiMoveInFlight = false
 
     /** 全谱分析任务；非空表示正在扫描（此时禁止一切改局面操作） */
     private var scanJob: Job? = null
+
+    /**
+     * 全谱分析代号：开扫与取消都 +1。取消后旧任务的 `finally` 会看到代号已变，
+     * 于是不再去清理/回写（否则「取消后立刻重扫」会被旧任务把进度、局面和引擎盘面一起覆盖）。
+     */
+    private var scanGeneration = 0
 
     /** 进入分析页的来源：来自对局时「返回」回对局 */
     private var analysisOrigin: Screen = Screen.MENU
@@ -183,13 +203,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     return@collect
                 }
                 lastPush = TimeSource.Monotonic.markNow()
-                val idle = st.phase == EngineStatus.Phase.IDLE
-                // 提示点：lz-analyze 不像 lz-genmove_analyze 那样给最终着法行（"play x"），
-                // 首选点只能从主变例首项取
-                val hintPoint = st.bestMoves.firstOrNull()?.takeIf { it.first >= 0 }
-                    ?: st.pvLines.firstOrNull()?.moves?.firstOrNull()
-                val pendingHint = hintActive && idle && hintPoint != null
-                if (hintActive && idle) hintActive = false
                 _ui.update { ui ->
                     // 曲线记录并入同一次状态更新，避免每路 PV 触发两次全量拷贝
                     var curve = ui.curve
@@ -205,7 +218,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         enginePhase = st.phase,
                         pvLines = st.pvLines,
                         bestMoves = st.bestMoves.filter { it.first >= 0 },
-                        hint = if (pendingHint) hintPoint else ui.hint,
                         engineThinking = aiMoveInFlight || st.phase == EngineStatus.Phase.THINKING,
                         curve = curve,
                     )
@@ -263,7 +275,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun resumeGame() {
         if (!canResumeGame()) return
-        _ui.update { it.copy(mode = gameMode, viewPly = null, hint = null) }
+        cancelHint()
+        _ui.update { it.copy(mode = gameMode, viewPly = null) }
         _screen.value = Screen.GAME
         refresh()
     }
@@ -273,14 +286,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         gameMode = mode
         board.clear()
         redoStack.clear()
-        hintActive = false
+        cancelHint()
         _ui.update {
             it.copy(
                 mode = mode,
                 humanColor = humanColor,
                 gameOver = null,
                 editMode = false,
-                hint = null,
                 pvLines = emptyList(),
                 bestMoves = emptyList(),
                 engineThinking = false,
@@ -313,7 +325,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             scanWasRunning = true
             cancelFullScan()
         }
-        if (!wasScanning && !hintActive &&
+        if (!wasScanning && hintJob == null &&
             engine.status.value.phase == EngineStatus.Phase.ANALYZING
         ) {
             resumeAnalysisOnStart = true
@@ -398,8 +410,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         board.pass(color)
         redoStack.clear()
         feedback.playPlaceSound(_ui.value.sound)
-        hintActive = false
-        _ui.update { it.copy(hint = null) }
+        cancelHint()
 
         if (!_ui.value.editMode && board.consecutivePasses >= 2) {
             endByDoublePass()
@@ -463,8 +474,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         redoStack.clear()
         feedback.playPlaceSound(_ui.value.sound)
         feedback.vibrate(_ui.value.vibrate)
-        hintActive = false
-        _ui.update { it.copy(hint = null) }
+        cancelHint()
 
         // AI 模式：用户落子后驱动引擎。先发起请求，使思考锁在本次刷新时即已生效
         val engineFollows = !fromEngine && _ui.value.mode == GameMode.AI && _ui.value.gameOver == null
@@ -542,8 +552,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val m = board.undo() ?: return
             redoStack.addLast(m)
         }
-        hintActive = false
-        _ui.update { it.copy(gameOver = null, hint = null) }
+        cancelHint()
+        _ui.update { it.copy(gameOver = null) }
         refresh()
         if (s.mode == GameMode.ANALYSIS) restartAnalysisIfActive()
     }
@@ -563,9 +573,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         cancelFullScan()
         board.clear()
         redoStack.clear()
-        hintActive = false
+        cancelHint()
         _ui.update {
-            it.copy(gameOver = null, hint = null, viewPly = null, curve = emptyMap())
+            it.copy(gameOver = null, viewPly = null, curve = emptyMap())
         }
         refresh()
     }
@@ -594,32 +604,77 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         board = GoBoard(size)
         board.restore(ByteArray(size * size), flipped)
         redoStack.clear()
-        hintActive = false
-        _ui.update { it.copy(hint = null, viewPly = null, curve = emptyMap()) }
+        cancelHint()
+        _ui.update { it.copy(viewPly = null, curve = emptyMap()) }
         refresh()
         restartAnalysisIfActive()
     }
 
     // ------------------------------------------------------------- 提示与分析
 
+    /**
+     * 提示：等引擎给出第一帧候选上报，把首选点画成提示圈。
+     *
+     * 等待窗口只当上限——pachi 的首帧上报要等某个点攒够 500 次模拟（`uct/walk.c` 的
+     * `uct_get_best_moves(..., 500)`），手表上远超旧的两秒固定窗口，而旧的固定窗口等不到数据时
+     * 什么都不会发生（提示圈画不出来，也没有任何文字反馈）。
+     *
+     * 分析中再点一次＝取消。按钮在引擎思考中/终局时是灰的，但点下去仍会说明原因，不再静默吞掉。
+     */
     fun hint() {
+        if (hintJob != null) {
+            cancelHint()
+            showMessage("已取消提示")
+            return
+        }
         val s = _ui.value
-        if (engineThinkingNow() || s.gameOver != null) return
+        if (s.gameOver != null) return
+        if (engineThinkingNow()) {
+            showMessage("引擎思考中，请稍候再试")
+            return
+        }
         if (s.viewPly != null) {
             showMessage("复盘浏览中，先点「回到当前」")
             return
         }
-        viewModelScope.launch {
-            if (!ensureEngine()) return@launch
-            if (!engine.stopAndAwait()) {
-                showMessage("引擎无响应，请重试")
-                return@launch
+        // start 推迟到 hintJob 赋值之后：finally 里要靠身份判断自己是不是「当前那个」提示任务
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            val self = coroutineContext[Job]
+            try {
+                // 先亮「提示分析中…」：引擎会话冷启动在手表上要好几秒，反馈晚于它就是没反馈
+                _ui.update { it.copy(hintBusy = true, hint = null) }
+                if (!ensureEngine()) return@launch
+                if (!engine.stopAndAwait()) {
+                    showMessage("引擎无响应，请重试")
+                    return@launch
+                }
+                // 分析必须自己停：pachi 的 lz-analyze 是无限分析，不主动停相位就永远停在
+                // ANALYZING（提示圈等的是 IDLE），人机对战里还会把落子闸门一直关着
+                val pv = engine
+                    .analyzeFor(board.moves.toList(), HINT_FIRST_REPORT_MS, HINT_EXTRA_MS)
+                    .getOrNull()
+                val pt = pv?.moves?.firstOrNull { it.first >= 0 }
+                if (pt != null) {
+                    _ui.update { it.copy(hint = pt, hintNonce = it.hintNonce + 1) }
+                } else {
+                    showMessage("引擎未给出建议，请重试")
+                }
+            } finally {
+                if (hintJob === self) {
+                    hintJob = null
+                    _ui.update { it.copy(hintBusy = false) }
+                }
             }
-            hintActive = true
-            // 必须限时自己停：pachi 的 lz-analyze 是无限分析，不主动停相位就永远停在
-            // ANALYZING（提示圈等的是 IDLE），人机对战里还会把落子闸门一直关着
-            engine.analyzeFor(board.moves.toList(), HINT_ANALYZE_MS)
         }
+        hintJob = job
+        job.start()
+    }
+
+    /** 取消在途的提示分析并清掉提示圈（改局面、退后台都要调，免得旧结果画到新局面上） */
+    private fun cancelHint() {
+        hintJob?.cancel()
+        hintJob = null
+        _ui.update { it.copy(hintBusy = false, hint = null) }
     }
 
     fun toggleAnalysis() {
@@ -661,34 +716,58 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setViewPly(ply: Int?) {
         val v = ply?.coerceIn(0, board.moveCount)
         if (_ui.value.viewPly == v) return
-        _ui.update { it.copy(viewPly = v, hint = null) }
+        cancelHint()
+        _ui.update { it.copy(viewPly = v) }
         refresh()
     }
 
     /** 全谱分析：逐手分析（每手等到引擎第一次上报就停），生成整局评估曲线；用 [cancelFullScan] 中断 */
     fun startFullScan() {
         val s = _ui.value
-        if (engineThinkingNow() || scanJob != null || s.viewPly != null) return
+        if (scanJob != null) return
+        if (engineThinkingNow()) {
+            showMessage("引擎思考中，稍后再试")
+            return
+        }
         if (board.moveCount == 0) {
             showMessage("先在棋盘上走出着法")
             return
         }
+        // 复盘浏览中也能开扫：扫描自己会逐手把局面推给 viewPly。以前这里直接 return，
+        // 而曲线图表只要被碰到一下就会设 viewPly，等于把扫描键悄无声息地锁死。
+        if (s.viewPly != null) setViewPly(null)
+        cancelHint()
+        val generation = ++scanGeneration
         scanJob = viewModelScope.launch {
             aiMoveInFlight = true
             val moves = board.moves.toList()
             val total = moves.size
-            val history = HashMap<Int, Float>()
+            // 未扫到的手数沿用已有曲线：中断/失败不至于把上一次的数据一并抹掉
+            val history = HashMap(_ui.value.curve.filterKeys { it <= total })
+            val budget = ScanBudget()
+            var holes = 0
+            var finished = false
             try {
                 if (!ensureEngine()) return@launch
-                _ui.update { it.copy(scan = GameUiState.Progress(0, total), curve = emptyMap()) }
+                _ui.update { it.copy(scan = GameUiState.Progress(0, total)) }
                 for (k in 1..total) {
                     if (!engine.stopAndAwait()) {
                         showMessage("引擎无响应，分析中断")
                         break
                     }
-                    engine.scanAnalyze(moves.take(k), SCAN_MAX_WAIT_MS)
-                    val wr = engine.status.value.pvLines.firstOrNull()?.winRate
-                    if (wr != null && !wr.isNaN()) history[k] = EngineValue.blackWinRate(wr, k)
+                    // 等待上限由 ScanBudget 按实测放宽：首帧上报要等某个点攒够 500 次模拟，
+                    // 手表上远超模拟器，固定 3 秒会让每一手都空手而归（曲线永远是空的）
+                    val startedAt = SystemClock.elapsedRealtime()
+                    val pv = engine.scanAnalyze(moves.take(k), budget.next()).getOrNull()
+                    val elapsed = (SystemClock.elapsedRealtime() - startedAt).toInt()
+                    val wr = pv?.winRate
+                    if (wr != null && !wr.isNaN()) {
+                        history[k] = EngineValue.blackWinRate(wr, k)
+                        budget.succeeded(elapsed)
+                    } else {
+                        budget.timedOut()
+                        holes++
+                    }
                     _ui.update {
                         it.copy(
                             scan = GameUiState.Progress(k, total),
@@ -697,21 +776,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         )
                     }
                     refresh()
+                    finished = true
+                }
+                if (finished) {
+                    if (holes == total) showMessage("引擎未返回评估，请重试")
+                    else if (holes > 0) showMessage("全谱分析完成 · $holes 手无评估")
                 }
             } finally {
-                scanJob = null
-                aiMoveInFlight = false
-                _ui.update {
-                    it.copy(scan = null, viewPly = null, engineThinking = engineThinkingNow())
-                }
-                refresh()
-                val mode = _ui.value.mode
-                if (_screen.value == Screen.ANALYSIS && mode == GameMode.ANALYSIS) {
-                    restartAnalysisIfActive()
-                } else if (mode == GameMode.AI) {
-                    // 取消路径（后台/用户中断）时任务已取消，挂起调用必须包 NonCancellable
-                    withContext(NonCancellable) {
-                        if (engine.stopAndAwait()) engine.syncBoard(board.moves.toList())
+                // 代号变了说明这次扫描已经被取消并可能已有新扫描接手：不要再回写现状
+                if (scanGeneration == generation) {
+                    scanJob = null
+                    aiMoveInFlight = false
+                    _ui.update {
+                        it.copy(scan = null, viewPly = null, engineThinking = engineThinkingNow())
+                    }
+                    refresh()
+                    val mode = _ui.value.mode
+                    if (_screen.value == Screen.ANALYSIS && mode == GameMode.ANALYSIS) {
+                        restartAnalysisIfActive()
+                    } else if (mode == GameMode.AI) {
+                        // 取消路径（后台/用户中断）时任务已取消，挂起调用必须包 NonCancellable
+                        withContext(NonCancellable) {
+                            if (engine.stopAndAwait()) engine.syncBoard(board.moves.toList())
+                        }
                     }
                 }
             }
@@ -720,9 +807,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun cancelFullScan() {
         val job = scanJob ?: return
+        scanGeneration++
         scanJob = null
         job.cancel()
         engine.stop()
+        // 立刻把界面从「扫描中」放出来（被取消任务自己的 finally 已过期，不会再做清理）
+        aiMoveInFlight = false
+        _ui.update { it.copy(scan = null, viewPly = null, engineThinking = engineThinkingNow()) }
+        refresh()
     }
 
     /** 采纳引擎最佳着法（分析模式） */
@@ -733,8 +825,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             showMessage("复盘浏览中，先点「回到当前」")
             return
         }
-        val best = s.bestMoves.firstOrNull() ?: s.pvLines.firstOrNull()?.moves?.firstOrNull() ?: return
-        if (best.first < 0) return
+        val best = HintPoint.choose(s.bestMoves, s.pvLines) ?: return
         if (board.get(best.first, best.second) != GoBoard.Color.EMPTY) return
         val color = if (s.editMode) s.editColor else s.sideToMove
         placeStone(best.first, best.second, color, fromEngine = false)

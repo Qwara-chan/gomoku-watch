@@ -109,7 +109,9 @@ fun GameScreen(vm: MainViewModel) {
         scheduleHide()
     }
 
-    LaunchedEffect(state.moves.size, state.engineThinking, state.message) { poke() }
+    LaunchedEffect(state.moves.size, state.engineThinking, state.message, state.hintBusy, state.scan) {
+        poke()
+    }
     LaunchedEffect(state.gameOver) {
         if (state.gameOver != null) {
             hideJob?.cancel()
@@ -238,6 +240,8 @@ fun GameScreen(vm: MainViewModel) {
                         icon = Icons.Default.Star,
                         onClick = vm::hint,
                         enabled = !state.engineThinking && state.gameOver == null,
+                        // 灰的也要能点出个说法；分析中保持可点＝再点一次取消
+                        onDisabledClick = vm::hint,
                         highlight = true,
                         label = stringResource(R.string.action_hint),
                     )
@@ -311,6 +315,13 @@ fun GameScreen(vm: MainViewModel) {
 private fun StatusCapsuleContent(state: GameUiState) {
     val turnColor = if (state.sideToMove == GoBoard.Color.BLACK) BlackStone else CreamWhite
     val statusText = when {
+        // 提示 / 全谱分析都在等引擎第一帧上报，慢设备上要好几秒：点按必须立刻有交代
+        state.hintBusy -> stringResource(R.string.status_hint_analyzing)
+        state.scan != null -> stringResource(
+            R.string.curve_scanning,
+            state.scan.done,
+            state.scan.total,
+        )
         state.engineThinking -> stringResource(R.string.status_engine_thinking)
         state.editMode -> stringResource(
             R.string.status_edit_mode,

@@ -91,10 +91,12 @@ fun EvalCurvePanel(
                 fontSize = 11.sp,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // 34dp 与底部弧线按钮一致：26dp 在手表上（≈3.3mm）根本戳不准，
+                // 而这是全谱分析唯一的入口
                 CircleIconButton(
                     icon = if (progress != null) Icons.Default.Close else Icons.Default.Refresh,
                     onClick = { if (progress != null) onCancelScan() else onScan() },
-                    size = 26.dp,
+                    size = 34.dp,
                     label = stringResource(
                         if (progress != null) R.string.curve_scan_cancel else R.string.curve_scan_start,
                     ),
@@ -104,7 +106,7 @@ fun EvalCurvePanel(
                     CircleIconButton(
                         icon = Icons.AutoMirrored.Filled.ArrowForward,
                         onClick = onBackToCurrent,
-                        size = 26.dp,
+                        size = 34.dp,
                         label = stringResource(R.string.curve_back_to_current),
                     )
                 }
@@ -128,7 +130,8 @@ fun EvalCurvePanel(
             onScrub = onScrub,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(46.dp),
+                // 40dp：按钮从 26→34dp 后收一点高度，整块面板才不会顶到顶部状态胶囊
+                .height(40.dp),
         )
 
         val value = curve[markerPly]

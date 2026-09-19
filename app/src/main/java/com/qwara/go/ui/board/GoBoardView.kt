@@ -122,7 +122,7 @@ fun GoBoardView(
     onUserInteraction: (() -> Unit)? = null,
 ) {
     val size = state.boardSize
-    val hintPulseState = rememberHintPulseState(state.hint)
+    val hintPulseState = rememberHintPulseState(state.hint, state.hintNonce)
     // pointerInput(Unit) 的手势闭包不会随 state 变化重启，取当前位置需用最新状态
     val latestState by rememberUpdatedState(state)
 
@@ -616,11 +616,14 @@ fun GoBoardView(
  * 不用 infiniteTransition——那只要棋盘在组合中就常驻帧时钟，即使没有提示也每帧
  * 唤醒 Choreographer，让 CPU 无法空闲（对局/分析页全程画着棋盘，是持续功耗源）。
  * 返回 State 而不读取值——避免组合阶段建立观察导致每帧重组整盘（draw 相位读值只重绘）。
+ *
+ * [nonce] 每次都随新提示自增：引擎再次给出同一个点时 [hint] 值不变，只按值做键的话
+ * LaunchedEffect 不会重启，提示圈定格不呼吸，看着就像「点了没反应」。
  */
 @Composable
-private fun rememberHintPulseState(hint: Pair<Int, Int>?): State<Float> {
+private fun rememberHintPulseState(hint: Pair<Int, Int>?, nonce: Int): State<Float> {
     val pulse = remember { Animatable(1f) }
-    LaunchedEffect(hint) {
+    LaunchedEffect(hint, nonce) {
         if (hint == null) {
             pulse.snapTo(1f)
         } else {

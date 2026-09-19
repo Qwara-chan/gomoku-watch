@@ -4,11 +4,14 @@
 package com.qwara.go.engine
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import com.qwara.go.game.GoBoard
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
@@ -30,8 +33,8 @@ import java.util.regex.Pattern
  *  - [engineMoveFirst] 让引擎执黑先行（整盘重放 + lz-genmove_analyze）；
  *  - [playUserMove] 用户走子后让引擎应着（整盘重放 + lz-genmove_analyze），挂起等待引擎着法；
  *  - [syncAndAnalyze] 同步任意局面（整盘重放）并开始实时分析（lz-analyze，[stop] 停止）；
- *  - [analyzeFor] 限时分析并自行停止（「提示」用，见其 KDoc 说明为何必须限时）；
- *  - [scanAnalyze] 单局面分析到第一次上报即停（全谱扫描逐手取评估）；
+ *  - [analyzeFor] 一次性分析：等引擎第一帧候选上报后自行停止并返回主变例（「提示」用）；
+ *  - [scanAnalyze] 同上一手的单局面版本（全谱扫描逐手取评估）；
  *  - [takeback] 引擎内部局面回退 N 手（GTP undo）；
  *  - [finalScore] 双 pass 终局后的数子（引擎判断，失败时 App 回退本地数子）；
  *  - [stopAndAwait] 改局面前调用；[shutdown] 销毁会话（Activity onCleared）。
@@ -86,6 +89,14 @@ class PachiEngine(private val context: Context) {
     /** 等待最终着手行的挂起点（playUserMove / engineMoveFirst） */
     @Volatile
     private var awaitingMoves: CompletableDeferred<Pt>? = null
+
+    /**
+     * 搜索/分析代号：每次开搜索（[prepareSearch]）或停止（[sendStop]）都 +1。
+     * 一次性分析的等待方只停「自己那一代」，免得迟到的定时器把别人刚开的分析掐死
+     * （连点两次提示、提示期间开扫描都会撞上）。只在 writeDispatcher 上改动。
+     */
+    @Volatile
+    private var searchEpoch: Long = 0
 
     /**
      * GTP 应答槽：每条命令一个，按发送顺序被应答行填充（fire-and-forget 命令的槽无人读，GC 即可）。
@@ -230,61 +241,88 @@ class PachiEngine(private val context: Context) {
         }
 
     /**
-     * 限时分析：开分析、等 [timeMs] 后自行停止并等回空闲。用于「提示」这类
-     * 一次性查询——分析必须自己结束，否则相位永远停在 ANALYZING，提示圈画不出来。
-     * 调用前必须确保引擎空闲。
+     * 一次性局面分析（「提示」与全谱扫描逐手共用）。
+     *
+     * 重放局面 → `lz-analyze` → 等第一帧候选上报（最多 [maxWaitMs]）→ 再多留 [extraMs] → 停。
+     *
+     * **首帧延迟由设备算力决定，不能靠固定窗口**：pachi 要等某个点攒够 500 次模拟才吐第一行
+     * （`uct/walk.c` 的 `uct_get_best_moves(..., 500)` 之后还有 `if (!best.n) return;`）。
+     * 实测宿主 0.6s、模拟器 0.8~1.5s、模拟器满负载 3~9.5s、手表更慢。所以 [maxWaitMs] 只当上限兜底、
+     * 数据一到就收手：固定窗口在慢设备上必然空手而归（提示不出圈、曲线每一手都没值）。
+     *
+     * 返回主变例；没等到上报则 null（调用方必须给出可见反馈，不能静默）。
+     * 取消（用户落子/退到后台）也会尽力停掉自己这一代的分析，引擎不会卡在 ANALYZING。
      */
-    suspend fun analyzeFor(moves: List<GoBoard.Move>, timeMs: Int): Result<Unit> =
-        withContext(writeDispatcher) {
-            try {
-                sendBoardCommands(moves)
-                val color = sideToMove(moves)
-                send("lz-analyze $color $ANALYZE_FREQ_CS")
-                delay(timeMs.toLong())
-                // 期间可能已被 stopAndAwait 停掉（用户落子/换局面）：那就别再发一遍停止命令
-                if (_status.value.phase == EngineStatus.Phase.ANALYZING) {
-                    sendStop()
-                    awaitIdle(timeMs * 2L + 4000)
-                }
-                Result.success(Unit)
-            } catch (t: Throwable) {
-                Result.failure(t)
+    private suspend fun analyzeOnce(
+        moves: List<GoBoard.Move>,
+        maxWaitMs: Int,
+        extraMs: Int = 0,
+    ): PvLine? {
+        sendBoardCommands(moves)
+        val epoch = searchEpoch
+        val color = sideToMove(moves)
+        val startedAt = SystemClock.elapsedRealtime()
+        send("lz-analyze $color $ANALYZE_FREQ_CS")
+        try {
+            val first = withTimeoutOrNull(maxWaitMs.toLong()) {
+                _status.first { it.pvLines.isNotEmpty() }.pvLines
             }
+            if (first == null) {
+                Log.w(
+                    TAG,
+                    "分析首帧 ${SystemClock.elapsedRealtime() - startedAt}ms 内无上报（上限 ${maxWaitMs}ms）",
+                )
+                return null
+            }
+            Log.i(TAG, "分析首帧 ${SystemClock.elapsedRealtime() - startedAt}ms 到位（${first.size} 路）")
+            // 首帧只有 ~500 次模拟，首选点还很不稳；多留一会儿让它长结实
+            if (extraMs > 0) delay(extraMs.toLong())
+            return _status.value.pvLines.minByOrNull { it.index } ?: first.minByOrNull { it.index }
+        } finally {
+            stopIfCurrent(epoch)
         }
+    }
+
+    /** 停掉「自己那一代」的分析：代号已变（别人接手 / 已经停过 / 相位不是分析中）就什么都不做 */
+    private suspend fun stopIfCurrent(epoch: Long) {
+        withContext(NonCancellable + writeDispatcher) {
+            if (searchEpoch == epoch && _status.value.phase == EngineStatus.Phase.ANALYZING) sendStop()
+        }
+    }
 
     /**
-     * 分析单个局面并在拿到第一次候选上报后立即停止（最多等 [maxWaitMs]）。
-     * 全谱扫描逐手取评估用；调用前必须确保引擎空闲。
-     *
-     * 不能只 delay 固定窗口：pachi 的首帧上报要 0.5~1.2 秒
-     * （reportfreq = 0.01 * freq = 0.5s，还要加上搜索启动开销），
-     * 实测固定 600ms 窗口在模拟器上一手数据都取不到，整条评估曲线永远是空的。
+     * 「提示」用：等到首帧候选后再多看 [extraMs]（让首选点稳一些），返回主变例。
+     * 调用前必须确保引擎空闲（分析必须自己结束，否则相位停在 ANALYZING，提示圈画不出来）。
      */
-    suspend fun scanAnalyze(moves: List<GoBoard.Move>, maxWaitMs: Int): Result<Unit> =
+    suspend fun analyzeFor(
+        moves: List<GoBoard.Move>,
+        maxWaitMs: Int,
+        extraMs: Int = 0,
+    ): Result<PvLine?> = withContext(writeDispatcher) {
+        try {
+            Result.success(analyzeOnce(moves, maxWaitMs, extraMs))
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            Result.failure(t)
+        }
+    }
+
+    /**
+     * 全谱扫描的单局面版本：拿到第一帧上报就停，返回主变例。
+     * 超过 [maxWaitMs] 仍无上报则返回 null（这一手无评估，调用方视作空洞而不是错误）。
+     * 调用前必须确保引擎空闲。
+     */
+    suspend fun scanAnalyze(moves: List<GoBoard.Move>, maxWaitMs: Int): Result<PvLine?> =
         withContext(writeDispatcher) {
             try {
-                sendBoardCommands(moves)
-                val color = sideToMove(moves)
-                send("lz-analyze $color $ANALYZE_FREQ_CS")
-                val reported = withTimeoutOrNull(maxWaitMs.toLong()) {
-                    _status.first { it.pvLines.isNotEmpty() }
-                }
-                if (reported == null) Log.w(TAG, "scanAnalyze: no report within ${maxWaitMs}ms")
-                sendStop()
-                awaitIdle(maxWaitMs * 2L + 4000)
-                Result.success(Unit)
+                Result.success(analyzeOnce(moves, maxWaitMs))
+            } catch (c: CancellationException) {
+                throw c
             } catch (t: Throwable) {
                 Result.failure(t)
             }
         }
-
-    /** 等相位回到 IDLE（[sendStop] 之后由本类自己置位）；超时报错由调用方决定是否忽略 */
-    private suspend fun awaitIdle(timeoutMs: Long) {
-        val idle = withTimeoutOrNull(timeoutMs) {
-            _status.first { it.phase == EngineStatus.Phase.IDLE }
-        }
-        if (idle == null) throw EngineException("分析超时")
-    }
 
     /** 发整盘重放命令；调用方保证后续等待逻辑 */
     private fun sendBoardCommands(moves: List<GoBoard.Move>) {
@@ -366,8 +404,9 @@ class PachiEngine(private val context: Context) {
 
     // --------------------------------------------------------- 内部
 
-    /** 标记一次搜索开始：清空上一次的候选，并把阶段置为搜索中。 */
+    /** 标记一次搜索开始：清空上一次的候选，把阶段置为搜索中，并翻新分析代号。 */
     private fun prepareSearch(phase: EngineStatus.Phase) {
+        searchEpoch++
         _status.update {
             it.copy(phase = phase, pvLines = emptyList(), bestMoves = emptyList())
         }
@@ -408,6 +447,7 @@ class PachiEngine(private val context: Context) {
      * 须在 writeDispatcher 上调用，保证与后续命令同序入队。
      */
     private fun sendStop() {
+        searchEpoch++
         send("lz-analyze black 0")
         _status.update {
             if (it.phase == EngineStatus.Phase.ANALYZING) it.copy(phase = EngineStatus.Phase.IDLE) else it

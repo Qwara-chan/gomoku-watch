@@ -68,6 +68,11 @@ fun CircleIconButton(
     highlight: Boolean = false,
     size: Dp = 34.dp,
     label: String? = null,
+    /**
+     * 置灰时被点到的处理（如弹一句「引擎思考中」）。不给就只吞掉这次点按——
+     * 按钮压在棋盘交叉点上，让点按穿透下去会莫名其妙落子，宁可吞掉也不能落子。
+     */
+    onDisabledClick: (() -> Unit)? = null,
 ) {
     val bg = if (highlight) WoodAmber else PanelDark
     val fg = if (highlight) BlackStone else CreamWhite
@@ -77,7 +82,7 @@ fun CircleIconButton(
             .size(size)
             .clip(CircleShape)
             .background(bg)
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable { if (enabled) onClick() else onDisabledClick?.invoke() },
         contentAlignment = Alignment.Center,
     ) {
         Icon(imageVector = icon, contentDescription = label, tint = fg, modifier = Modifier.size(18.dp))

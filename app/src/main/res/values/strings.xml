@@ -33,6 +33,7 @@
     <string name="status_black_turn">黑棋行棋</string>
     <string name="status_white_turn">白棋行棋</string>
     <string name="status_engine_thinking">引擎思考中…</string>
+    <string name="status_hint_analyzing">提示分析中…</string>
     <!-- 人机对战思考中读数：行棋方（即引擎）胜率 · 首选点 -->
     <string name="status_thinking_rate">胜率 %1$s · 首选 %2$s</string>
     <string name="status_your_turn">轮到你走</string>
@@ -75,7 +76,7 @@
     <string name="curve_scanning">全谱分析中 %1$d/%2$d</string>
     <string name="curve_readout">第 %1$d 手 · 黑方胜率 %2$d%%</string>
     <string name="curve_no_value">第 %1$d 手 · 无评估</string>
-    <string name="curve_empty">点右上角按钮做全谱分析</string>
+    <string name="curve_empty">点 ↻ 做全谱分析</string>
 
     <!-- 选择先后手 -->
     <string name="choose_color">选择执子</string>
