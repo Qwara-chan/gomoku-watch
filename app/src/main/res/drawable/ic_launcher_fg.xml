@@ -1,20 +1,79 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  图标前景层：7×7 网格 + 星位 + 黑白各两子的对峙。
+  所有石子都落在交叉点上并整体收在 66dp 安全区内，网格延伸到画布边缘，
+  圆形/方形裁切下都呈现「满版棋盘」；网格与石子同层，无视差错位。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 棋盘格线 -->
+
+    <!-- 网格：线位 21/32/43/54/65/76/87 -->
     <path
-        android:strokeColor="#8D6E63"
-        android:strokeWidth="3"
-        android:pathData="M24,24 L84,24 M24,42 L84,42 M24,60 L84,60 M24,78 L84,78 M24,24 L24,84 M42,24 L42,84 M60,24 L60,84 M78,24 L78,84" />
-    <!-- 黑子 -->
+        android:strokeColor="#6E4318"
+        android:strokeAlpha="0.78"
+        android:strokeWidth="0.9"
+        android:pathData="M21,21 L87,21 M21,32 L87,32 M21,43 L87,43 M21,54 L87,54 M21,65 L87,65 M21,76 L87,76 M21,87 L87,87 M21,21 L21,87 M32,21 L32,87 M43,21 L43,87 M54,21 L54,87 M65,21 L65,87 M76,21 L76,87 M87,21 L87,87" />
+
+    <!-- 星位（角星与天元） -->
     <path
-        android:fillColor="#212121"
-        android:pathData="M60,60 m-9,0 a9,9 0 1,1 18,0 a9,9 0 1,1 -18,0" />
-    <!-- 白子 -->
+        android:fillColor="#5A3A14"
+        android:pathData="M32,32 m-1.4,0 a1.4,1.4 0 1,1 2.8,0 a1.4,1.4 0 1,1 -2.8,0 M76,32 m-1.4,0 a1.4,1.4 0 1,1 2.8,0 a1.4,1.4 0 1,1 -2.8,0 M32,76 m-1.4,0 a1.4,1.4 0 1,1 2.8,0 a1.4,1.4 0 1,1 -2.8,0 M76,76 m-1.4,0 a1.4,1.4 0 1,1 2.8,0 a1.4,1.4 0 1,1 -2.8,0 M54,54 m-1.4,0 a1.4,1.4 0 1,1 2.8,0 a1.4,1.4 0 1,1 -2.8,0" />
+
+    <!-- 石子投影 -->
     <path
-        android:fillColor="#FAFAFA"
-        android:pathData="M42,42 m-9,0 a9,9 0 1,1 18,0 a9,9 0 1,1 -18,0" />
+        android:fillColor="#4A2E10"
+        android:fillAlpha="0.30"
+        android:pathData="M33,44.5 m-5.6,0 a5.6,5.6 0 1,1 11.2,0 a5.6,5.6 0 1,1 -11.2,0 M77,44.5 m-5.6,0 a5.6,5.6 0 1,1 11.2,0 a5.6,5.6 0 1,1 -11.2,0 M77,66.5 m-5.6,0 a5.6,5.6 0 1,1 11.2,0 a5.6,5.6 0 1,1 -11.2,0 M33,66.5 m-5.6,0 a5.6,5.6 0 1,1 11.2,0 a5.6,5.6 0 1,1 -11.2,0" />
+
+    <!-- 黑子（左上、右下）：高光偏左上的径向渐变 -->
+    <path android:pathData="M32,43 m-5.2,0 a5.2,5.2 0 1,1 10.4,0 a5.2,5.2 0 1,1 -10.4,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="30.4"
+                android:centerY="41.2"
+                android:gradientRadius="8.5"
+                android:startColor="#7E7E7E"
+                android:endColor="#171512" />
+        </aapt:attr>
+    </path>
+    <path android:pathData="M76,65 m-5.2,0 a5.2,5.2 0 1,1 10.4,0 a5.2,5.2 0 1,1 -10.4,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="74.4"
+                android:centerY="63.2"
+                android:gradientRadius="8.5"
+                android:startColor="#7E7E7E"
+                android:endColor="#171512" />
+        </aapt:attr>
+    </path>
+
+    <!-- 白子（右上、左下）：暖白渐变，呼应 CreamWhite -->
+    <path android:pathData="M76,43 m-5.2,0 a5.2,5.2 0 1,1 10.4,0 a5.2,5.2 0 1,1 -10.4,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="74.4"
+                android:centerY="41.2"
+                android:gradientRadius="8.5"
+                android:startColor="#FFFFFF"
+                android:endColor="#D5CCBA" />
+        </aapt:attr>
+    </path>
+    <path android:pathData="M32,65 m-5.2,0 a5.2,5.2 0 1,1 10.4,0 a5.2,5.2 0 1,1 -10.4,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="30.4"
+                android:centerY="63.2"
+                android:gradientRadius="8.5"
+                android:startColor="#FFFFFF"
+                android:endColor="#D5CCBA" />
+        </aapt:attr>
+    </path>
 </vector>

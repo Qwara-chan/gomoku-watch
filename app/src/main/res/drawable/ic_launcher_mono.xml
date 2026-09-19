@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  单色主题图标层（Android 13+ 按系统取色）：网格 + 星位 + 四子的平面剪影。
+  系统只用 alpha 通道做取色遮罩，所有形状实心即可。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#000000"
+        android:strokeColor="#000000"
+        android:strokeWidth="0.9"
+        android:pathData="M21,21 L87,21 M21,32 L87,32 M21,43 L87,43 M21,54 L87,54 M21,65 L87,65 M21,76 L87,76 M21,87 L87,87 M21,21 L21,87 M32,21 L32,87 M43,21 L43,87 M54,21 L54,87 M65,21 L65,87 M76,21 L76,87 M87,21 L87,87
+            M32,32 m-1.4,0 a1.4,1.4 0 1,1 2.8,0 a1.4,1.4 0 1,1 -2.8,0 M76,32 m-1.4,0 a1.4,1.4 0 1,1 2.8,0 a1.4,1.4 0 1,1 -2.8,0 M32,76 m-1.4,0 a1.4,1.4 0 1,1 2.8,0 a1.4,1.4 0 1,1 -2.8,0 M76,76 m-1.4,0 a1.4,1.4 0 1,1 2.8,0 a1.4,1.4 0 1,1 -2.8,0 M54,54 m-1.4,0 a1.4,1.4 0 1,1 2.8,0 a1.4,1.4 0 1,1 -2.8,0" />
+
+    <path
+        android:fillColor="#000000"
+        android:pathData="M32,43 m-5.2,0 a5.2,5.2 0 1,1 10.4,0 a5.2,5.2 0 1,1 -10.4,0 M76,43 m-5.2,0 a5.2,5.2 0 1,1 10.4,0 a5.2,5.2 0 1,1 -10.4,0 M76,65 m-5.2,0 a5.2,5.2 0 1,1 10.4,0 a5.2,5.2 0 1,1 -10.4,0 M32,65 m-5.2,0 a5.2,5.2 0 1,1 10.4,0 a5.2,5.2 0 1,1 -10.4,0" />
+</vector>
