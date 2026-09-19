@@ -160,7 +160,15 @@ fun GameScreen(vm: MainViewModel) {
                 ) {
                     CircleIconButton(
                         icon = Icons.AutoMirrored.Filled.ArrowBack,
-                        onClick = vm::toMenu,
+                        // 与 BackHandler 同一套语义：盘上有子且未终局时弹离开确认，
+                        // 否则（空盘/已终局）直接回主菜单
+                        onClick = {
+                            if (state.moves.isNotEmpty() && state.gameOver == null) {
+                                showLeaveConfirm = true
+                            } else {
+                                vm.toMenu()
+                            }
+                        },
                         size = 28.dp,
                     )
                     Spacer(Modifier.width(4.dp))
@@ -313,8 +321,14 @@ fun GameScreen(vm: MainViewModel) {
 /** 胶囊内的状态内容：回合点 + 状态文字 + 手数。 */
 @Composable
 private fun StatusCapsuleContent(state: GameUiState) {
-    val turnColor = if (state.sideToMove == GoBoard.Color.BLACK) BlackStone else CreamWhite
+    val turnColor = when {
+        state.gameOver != null -> WoodAmber
+        state.sideToMove == GoBoard.Color.BLACK -> BlackStone
+        else -> CreamWhite
+    }
     val statusText = when {
+        // 终局后显示结算文案；否则唤醒 chrome 会把过期的「黑棋行棋 N 手」盖在已终局的盘面上
+        state.gameOver != null -> state.gameOver
         // 提示 / 全谱分析都在等引擎第一帧上报，慢设备上要好几秒：点按必须立刻有交代
         state.hintBusy -> stringResource(R.string.status_hint_analyzing)
         state.scan != null -> stringResource(

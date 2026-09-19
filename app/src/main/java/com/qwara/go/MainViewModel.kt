@@ -363,7 +363,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             showMessage("已回到当前局面")
             return
         }
-        if (s.gameOver != null) return
+        // 终局后从主菜单进「局面分析」会带着 gameOver：分析是对局面的自由沙盒，
+        // 落子/摆谱必须照常可用（对局页的落子仍被拦，避免终局后误触改盘）
+        if (s.gameOver != null && s.mode != GameMode.ANALYSIS) return
         if (!board.inBounds(x, y)) return
 
         val color = when {

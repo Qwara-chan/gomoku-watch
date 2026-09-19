@@ -60,7 +60,7 @@ Three paths, all in `GoBoardView`; keep them consistent — zoom direction lives
 
 ## Navigation and the in-memory game
 
-The board is never cleared by navigation — only `startGame`/`clearBoard`/`flipColors` touch it. `backFromAnalysis()` returns to the game whenever analysis came from the game *or* `canResumeGame()`; do not make analysis exit unconditionally `toMenu()`. Changing board size or komi in settings rebuilds the board/session (`sessionKey = boardSize to komi` in `MainViewModel.ensureEngine`).
+The board is never cleared by navigation — only `startGame`/`clearBoard`/`flipColors` touch it. `backFromAnalysis()` returns to the game whenever analysis came from the game *or* `canResumeGame()`; do not make analysis exit unconditionally `toMenu()`. Changing board size or komi in settings rebuilds the board/session (`sessionKey = boardSize to komi` in `MainViewModel.ensureEngine`). Entering 局面分析 after a game has ended therefore inherits the finished position (terminal passes included — pachi replays it fine): `onBoardTap` deliberately bypasses the `gameOver` guard in ANALYSIS mode so the sandbox stays editable, while the game page keeps blocking placement on a finished board; `gameOver` itself stays set, so a scored game never becomes resumable and `backFromAnalysis` still exits to the menu. The game page's back arrow and the system back share one semantic (moves present && not over → leave-confirm, else straight `toMenu()`), and the status capsule shows the settlement text instead of 「黑棋行棋 N 手」 once `gameOver` is set.
 
 ## Licenses
 
