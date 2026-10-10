@@ -47,6 +47,17 @@ class ScanBudgetTest {
         assertEquals(24000, b.next())
     }
 
+    /** 重试空洞时给到封顶：那一手已经用较窄的窗口失败过（快设备也可能把预算收回 floor） */
+    @Test
+    fun `retries can ask for the widest window`() {
+        val b = ScanBudget()
+        assertEquals(24000, b.ceiling())
+        b.timedOut()
+        b.succeeded(1000) // 预算被收回 floor
+        assertEquals(8000, b.next())
+        assertEquals(24000, b.ceiling())
+    }
+
     @Test
     fun `success after a timeout pulls the budget back`() {
         val b = ScanBudget()

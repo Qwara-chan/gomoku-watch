@@ -234,3 +234,50 @@ class GoBoardTest {
         assertEquals(GoBoard.Illegal.OCCUPIED, b.place(2, 2, GoBoard.Color.WHITE).illegal)
     }
 }
+
+/**
+ * 行棋方推算：曲线换算和引擎命令都用它。不能用手数奇偶代替——摆谱可以连摆同色子，
+ * 翻转棋盘还能让白先行，奇偶一旦与实际不符，胜率换算会整段取反。
+ */
+class SideToMoveTest {
+
+    private fun moves(vararg colors: GoBoard.Color): List<GoBoard.Move> =
+        colors.mapIndexed { i, c -> GoBoard.Move(i, i, c) }
+
+    @Test
+    fun `an empty board is black to move`() {
+        assertEquals(GoBoard.Color.BLACK, GoBoard.sideToMoveAfter(emptyList()))
+    }
+
+    @Test
+    fun `alternating moves hand over to the other colour`() {
+        assertEquals(GoBoard.Color.WHITE, GoBoard.sideToMoveAfter(moves(GoBoard.Color.BLACK)))
+        assertEquals(
+            GoBoard.Color.BLACK,
+            GoBoard.sideToMoveAfter(moves(GoBoard.Color.BLACK, GoBoard.Color.WHITE)),
+        )
+    }
+
+    /** pass 也占一手，行棋方照常换人 */
+    @Test
+    fun `a pass still hands over`() {
+        val withPass = listOf(
+            GoBoard.Move(3, 3, GoBoard.Color.BLACK),
+            GoBoard.Move(-1, -1, GoBoard.Color.WHITE),
+        )
+        assertEquals(GoBoard.Color.BLACK, GoBoard.sideToMoveAfter(withPass))
+    }
+
+    /** 连摆同色子（分析页摆谱）：只看最后一手的颜色，不看手数奇偶 */
+    @Test
+    fun `consecutive same-colour stones decide by the last move`() {
+        val sandbox = moves(GoBoard.Color.BLACK, GoBoard.Color.BLACK, GoBoard.Color.BLACK)
+        assertEquals(GoBoard.Color.WHITE, GoBoard.sideToMoveAfter(sandbox))
+    }
+
+    /** 翻转棋盘后白先行 */
+    @Test
+    fun `white can start the game`() {
+        assertEquals(GoBoard.Color.BLACK, GoBoard.sideToMoveAfter(moves(GoBoard.Color.WHITE)))
+    }
+}

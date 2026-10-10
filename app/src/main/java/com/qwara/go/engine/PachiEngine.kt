@@ -204,7 +204,7 @@ class PachiEngine(private val context: Context) {
         if (!stopAndAwait(AWAIT_IDLE_MS)) return Result.failure(EngineException("引擎无响应"))
         return withContext(writeDispatcher) {
             runCatching {
-                prepareSearch(EngineStatus.Phase.THINKING)
+                prepareSearch(EngineStatus.Phase.THINKING, position.size, GoBoard.sideToMoveAfter(position))
                 requestMoves {
                     sendPosition(position)
                     send(timeSettingsCmd(timeMs))
@@ -326,7 +326,7 @@ class PachiEngine(private val context: Context) {
 
     /** 发整盘重放命令；调用方保证后续等待逻辑 */
     private fun sendBoardCommands(moves: List<GoBoard.Move>) {
-        prepareSearch(EngineStatus.Phase.ANALYZING)
+        prepareSearch(EngineStatus.Phase.ANALYZING, moves.size, GoBoard.sideToMoveAfter(moves))
         sendPosition(moves)
     }
 
@@ -343,7 +343,7 @@ class PachiEngine(private val context: Context) {
     }
 
     private fun sideToMove(moves: List<GoBoard.Move>): String =
-        if (moves.isEmpty()) "black" else colorName(moves.last().color.opponent)
+        colorName(GoBoard.sideToMoveAfter(moves))
 
     private fun colorName(c: GoBoard.Color): String = if (c == GoBoard.Color.BLACK) "black" else "white"
 
@@ -404,11 +404,17 @@ class PachiEngine(private val context: Context) {
 
     // --------------------------------------------------------- 内部
 
-    /** 标记一次搜索开始：清空上一次的候选，把阶段置为搜索中，并翻新分析代号。 */
-    private fun prepareSearch(phase: EngineStatus.Phase) {
+    /** 标记一次搜索开始：清空上一次的候选，记下这是哪个局面，把阶段置为搜索中，并翻新分析代号。 */
+    private fun prepareSearch(phase: EngineStatus.Phase, ply: Int, toMove: GoBoard.Color) {
         searchEpoch++
         _status.update {
-            it.copy(phase = phase, pvLines = emptyList(), bestMoves = emptyList())
+            it.copy(
+                phase = phase,
+                pvLines = emptyList(),
+                bestMoves = emptyList(),
+                pvPly = ply,
+                pvToMove = toMove,
+            )
         }
     }
 

@@ -301,5 +301,12 @@ class GoBoard(val size: Int = DEFAULT_SIZE) {
 
     companion object {
         const val DEFAULT_SIZE = 19
+
+        /**
+         * 一手序列之后轮到谁走：空盘黑先，否则最后一手的对手色（pass 也占一手，照此推算）。
+         * 不能用手数奇偶代替——摆谱可以连摆同色子、翻转棋盘还能让白先行。
+         */
+        fun sideToMoveAfter(moves: List<Move>): Color =
+            moves.lastOrNull()?.color?.opponent ?: Color.BLACK
     }
 }

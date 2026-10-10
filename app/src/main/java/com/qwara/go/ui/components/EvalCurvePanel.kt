@@ -69,6 +69,11 @@ fun EvalCurvePanel(
     modifier: Modifier = Modifier,
 ) {
     val reviewing = progress == null && markerPly < maxPly
+    // 曲线有缺手时按钮是「补缺」而不是「重扫」：已有评估值的手数会被跳过（手表上单手十几秒，
+    // 从头再来几分钟），文案得跟行为对上，否则点下去像是没反应
+    val incomplete = remember(curve, maxPly) {
+        (1..maxPly).any { k -> curve[k]?.let { !it.isNaN() } != true }
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -98,7 +103,11 @@ fun EvalCurvePanel(
                     onClick = { if (progress != null) onCancelScan() else onScan() },
                     size = 34.dp,
                     label = stringResource(
-                        if (progress != null) R.string.curve_scan_cancel else R.string.curve_scan_start,
+                        when {
+                            progress != null -> R.string.curve_scan_cancel
+                            incomplete -> R.string.curve_scan_resume
+                            else -> R.string.curve_scan_start
+                        },
                     ),
                 )
                 if (reviewing) {

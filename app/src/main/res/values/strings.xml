@@ -70,6 +70,8 @@
     <!-- 评估曲线 -->
     <string name="curve_title">评估曲线</string>
     <string name="curve_scan_start">全谱分析</string>
+    <!-- 曲线有缺手时按钮改为「补全评估」：已有评估的手数会跳过，只补没算到的 -->
+    <string name="curve_scan_resume">补全评估</string>
     <string name="curve_scan_cancel">取消分析</string>
     <string name="curve_back_to_current">回到当前</string>
     <string name="curve_collapse">收起</string>

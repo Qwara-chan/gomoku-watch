@@ -14,6 +14,7 @@ import com.qwara.go.engine.HintPoint
 import com.qwara.go.engine.PachiEngine
 import com.qwara.go.engine.PvLine
 import com.qwara.go.engine.ScanBudget
+import com.qwara.go.engine.ScanPlan
 import com.qwara.go.game.GoBoard
 import com.qwara.go.ui.util.FeedbackHelper
 import kotlin.time.Duration.Companion.milliseconds
@@ -49,6 +50,12 @@ private const val HINT_EXTRA_MS = 1000
  * 整屏重组 + 整盘重绘，压到最多约 8 次/秒肉眼依旧流畅；相位变化（含 IDLE）不受限。
  */
 private val PV_PUSH_INTERVAL = 120.milliseconds
+
+/**
+ * 一轮全谱分析最多跑几趟。第一趟扫目标手数，只把仍然失败（没等到首帧）的手数交给第二趟——
+ * 那一趟的等待窗口给到 [ScanBudget.ceiling]，慢设备上「标定手就超时」的情况才能补救回来。
+ */
+private const val SCAN_PASSES = 2
 
 /**
  * 注意：grid 为 ByteArray，data class 的 equals 对它按引用比较。刷新时总是生成新数组，
@@ -206,12 +213,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.update { ui ->
                     // 曲线记录并入同一次状态更新，避免每路 PV 触发两次全量拷贝
                     var curve = ui.curve
-                    if (scanJob == null && !ui.editMode) {
+                    // 只记「当前局面」的评估：停止分析不清候选，相位落回 IDLE 后仍可能来一次
+                    // 带上一手候选的发射（取消扫描、退后台都会），按手数写曲线就会把别的局面
+                    // 的胜率盖到当前手数上——末点反向、跳变都是这么来的。
+                    if (scanJob == null && !ui.editMode && st.pvPly == board.moveCount) {
                         val wr = st.pvLines.firstOrNull()?.winRate
                         if (wr != null && !wr.isNaN()) {
-                            val ply = board.moveCount
-                            val black = EngineValue.blackWinRate(wr, ply)
-                            if (ui.curve[ply] != black) curve = ui.curve + (ply to black)
+                            val black = EngineValue.blackWinRate(wr, st.pvToMove)
+                            if (ui.curve[st.pvPly] != black) curve = ui.curve + (st.pvPly to black)
                         }
                     }
                     ui.copy(
@@ -342,7 +351,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         scanWasRunning = false
         resumeAnalysisOnStart = false
         when {
-            resumeScan -> startFullScan()
+            // 熄屏/切后台会中断扫描（无限分析留在后台只会一直满载耗电），回来接着补缺：
+            // 已经算出来的手数原地保留，不再从头重算
+            resumeScan -> startFullScan(resumeOnly = true)
             resumeAnalysis && _screen.value == Screen.ANALYSIS && _ui.value.mode == GameMode.ANALYSIS -> {
                 viewModelScope.launch {
                     if (!ensureEngine()) return@launch
@@ -555,9 +566,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             redoStack.addLast(m)
         }
         cancelHint()
+        pruneCurve()
         _ui.update { it.copy(gameOver = null) }
         refresh()
         if (s.mode == GameMode.ANALYSIS) restartAnalysisIfActive()
+    }
+
+    /**
+     * 悔棋后手数变小，比当前手数更远的手数对应的局面已经不存在了：曲线里那一段必须丢掉，
+     * 否则「续算时跳过已有评估」会把它们当成有效值留在曲线末端（随后又在新分支上写同一批手数，
+     * 曲线就出现台阶/断口）。
+     */
+    private fun pruneCurve() {
+        val n = board.moveCount
+        _ui.update { ui ->
+            if (ui.curve.keys.none { it > n }) ui
+            else ui.copy(curve = ui.curve.filterKeys { it <= n })
+        }
     }
 
     fun redo() {
@@ -723,8 +748,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
 
-    /** 全谱分析：逐手分析（每手等到引擎第一次上报就停），生成整局评估曲线；用 [cancelFullScan] 中断 */
-    fun startFullScan() {
+    /**
+     * 全谱分析：逐手分析（每手等到引擎第一次上报就停），生成整局评估曲线；用 [cancelFullScan] 中断。
+     *
+     * 扫哪些手由曲线现状决定：**已有评估值的手数一律跳过**。手表上单手要等引擎攒够 500 次模拟
+     * （实测 8~24 秒），重算已经算出来的部分纯属浪费，而中断（熄屏、取消、退后台）随时会发生；
+     * 曲线已完整（1..total 一手不缺）时才整条重算，于是 ↻ 永远不会变成「点了没反应」。
+     *
+     * @param resumeOnly 只为续算而开（回前台自动恢复）：没有缺手就直接结束，不做整条重算——
+     *   自动恢复不该在用户没要求时从头扫一遍
+     */
+    fun startFullScan(resumeOnly: Boolean = false) {
         val s = _ui.value
         if (scanJob != null) return
         if (engineThinkingNow()) {
@@ -735,6 +769,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             showMessage("先在棋盘上走出着法")
             return
         }
+        val moves = board.moves.toList()
+        val total = moves.size
+        val holes = ScanPlan.holes(s.curve, total)
+        if (holes.isEmpty() && resumeOnly) return
+        // 有缺手就补缺（未扫到的手数沿用已有曲线），一手不缺才整条重算
+        val targets = if (holes.isEmpty()) (1..total).toList() else holes
+        if (holes.isNotEmpty()) showMessage("继续分析 · 补 ${holes.size} 手")
         // 复盘浏览中也能开扫：扫描自己会逐手把局面推给 viewPly。以前这里直接 return，
         // 而曲线图表只要被碰到一下就会设 viewPly，等于把扫描键悄无声息地锁死。
         if (s.viewPly != null) setViewPly(null)
@@ -742,48 +783,53 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val generation = ++scanGeneration
         scanJob = viewModelScope.launch {
             aiMoveInFlight = true
-            val moves = board.moves.toList()
-            val total = moves.size
             // 未扫到的手数沿用已有曲线：中断/失败不至于把上一次的数据一并抹掉
             val history = HashMap(_ui.value.curve.filterKeys { it <= total })
             val budget = ScanBudget()
-            var holes = 0
-            var finished = false
+            var interrupted = false
             try {
                 if (!ensureEngine()) return@launch
-                _ui.update { it.copy(scan = GameUiState.Progress(0, total)) }
-                for (k in 1..total) {
-                    if (!engine.stopAndAwait()) {
-                        showMessage("引擎无响应，分析中断")
-                        break
+                pushScan(history, total)
+                var queue = targets
+                var pass = 0
+                var lastPassOk = 0
+                while (queue.isNotEmpty() && pass < SCAN_PASSES) {
+                    // 上一趟一手都没成功说明引擎整体不出数据（会话没了/命令被丢），
+                    // 再来一趟只会把同样的等待再耗一遍
+                    if (pass > 0 && lastPassOk == 0) break
+                    val failed = mutableListOf<Int>()
+                    var ok = 0
+                    for (k in queue) {
+                        if (!engine.stopAndAwait()) {
+                            interrupted = true
+                            break
+                        }
+                        // 等待上限由 ScanBudget 按实测放宽：首帧上报要等某个点攒够 500 次模拟，
+                        // 手表上远超模拟器，固定 3 秒会让每一手都空手而归（曲线永远是空的）。
+                        // 重试手（第二趟）直接给到封顶——它已经用较窄的窗口失败过一次。
+                        val waitMs = if (pass > 0) budget.ceiling() else budget.next()
+                        val startedAt = SystemClock.elapsedRealtime()
+                        val pv = engine.scanAnalyze(moves.take(k), waitMs).getOrNull()
+                        val elapsed = (SystemClock.elapsedRealtime() - startedAt).toInt()
+                        val wr = pv?.winRate
+                        if (wr != null && !wr.isNaN()) {
+                            // 胜率是行棋方视角，按**真实**行棋方换算：摆谱可连摆同色子、翻转可白先行，
+                            // 用手数奇偶推断会让曲线从某一手起整段取反
+                            history[k] = EngineValue.blackWinRate(wr, moves[k - 1].color.opponent)
+                            budget.succeeded(elapsed)
+                            ok++
+                        } else {
+                            budget.timedOut()
+                            failed.add(k)
+                        }
+                        pushScan(history, total, k)
                     }
-                    // 等待上限由 ScanBudget 按实测放宽：首帧上报要等某个点攒够 500 次模拟，
-                    // 手表上远超模拟器，固定 3 秒会让每一手都空手而归（曲线永远是空的）
-                    val startedAt = SystemClock.elapsedRealtime()
-                    val pv = engine.scanAnalyze(moves.take(k), budget.next()).getOrNull()
-                    val elapsed = (SystemClock.elapsedRealtime() - startedAt).toInt()
-                    val wr = pv?.winRate
-                    if (wr != null && !wr.isNaN()) {
-                        history[k] = EngineValue.blackWinRate(wr, k)
-                        budget.succeeded(elapsed)
-                    } else {
-                        budget.timedOut()
-                        holes++
-                    }
-                    _ui.update {
-                        it.copy(
-                            scan = GameUiState.Progress(k, total),
-                            curve = history.toMap(),
-                            viewPly = k,
-                        )
-                    }
-                    refresh()
-                    finished = true
+                    if (interrupted) break
+                    lastPassOk = ok
+                    queue = failed
+                    pass++
                 }
-                if (finished) {
-                    if (holes == total) showMessage("引擎未返回评估，请重试")
-                    else if (holes > 0) showMessage("全谱分析完成 · $holes 手无评估")
-                }
+                reportScanResult(history, total, interrupted)
             } finally {
                 // 代号变了说明这次扫描已经被取消并可能已有新扫描接手：不要再回写现状
                 if (scanGeneration == generation) {
@@ -804,6 +850,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             }
+        }
+    }
+
+    /** 推进扫描进度与曲线。[viewPly] 非空时把棋盘推到正在分析的局面 */
+    private fun pushScan(history: Map<Int, Float>, total: Int, viewPly: Int? = null) {
+        var done = 0
+        for (k in 1..total) {
+            val v = history[k]
+            if (v != null && !v.isNaN()) done++
+        }
+        _ui.update {
+            it.copy(
+                scan = GameUiState.Progress(done, total),
+                curve = history.toMap(),
+                viewPly = viewPly ?: it.viewPly,
+            )
+        }
+        refresh()
+    }
+
+    /** 扫描收尾文案：缺手数按「1..total 里真正没有评估值的手数」算，不只看超时次数 */
+    private fun reportScanResult(history: Map<Int, Float>, total: Int, interrupted: Boolean) {
+        val missing = ScanPlan.holes(history, total).size
+        when {
+            interrupted -> showMessage("引擎无响应 · 已评估 ${total - missing}/$total 手")
+            missing == total -> showMessage("引擎未返回评估，请重试")
+            missing > 0 -> showMessage("全谱分析完成 · $missing 手无评估")
+            else -> showMessage("全谱分析完成")
         }
     }
 
@@ -880,8 +954,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun sideToMoveNow(): GoBoard.Color =
-        if (board.moveCount == 0) GoBoard.Color.BLACK else board.moves.last().color.opponent
+    private fun sideToMoveNow(): GoBoard.Color = GoBoard.sideToMoveAfter(board.moves)
 
     /** 前 [ply] 手形成的盘面（复盘浏览用；重放含提子，与真实对局一致） */
     private fun gridAt(moves: List<GoBoard.Move>, ply: Int): ByteArray {

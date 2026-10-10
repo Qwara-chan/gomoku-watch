@@ -3,31 +3,66 @@
 
 package com.qwara.go.engine
 
+import com.qwara.go.game.GoBoard
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/** 胜率换算：引擎给的是行棋方胜率，曲线统一按黑方存；偶数手黑方行棋。 */
+/**
+ * 胜率换算：引擎给的是行棋方胜率，曲线统一按黑方存。
+ * 换算只认**真实**行棋方（摆谱可连摆同色子、翻转棋盘可让白先行），手数奇偶推断会整段取反。
+ */
 class EngineValueTest {
 
     @Test
-    fun `even ply is black to move so the rate is kept`() {
-        assertEquals(0.61f, EngineValue.blackWinRate(0.61f, 0), 0f)
-        assertEquals(0.61f, EngineValue.blackWinRate(0.61f, 4), 0f)
+    fun `black to move keeps the rate`() {
+        assertEquals(0.61f, EngineValue.blackWinRate(0.61f, GoBoard.Color.BLACK), 0f)
     }
 
     @Test
-    fun `odd ply is white to move so the rate is mirrored`() {
-        assertEquals(0.39f, EngineValue.blackWinRate(0.61f, 1), 0f)
-        assertEquals(0.39f, EngineValue.blackWinRate(0.61f, 3), 0f)
+    fun `white to move mirrors the rate`() {
+        assertEquals(0.39f, EngineValue.blackWinRate(0.61f, GoBoard.Color.WHITE), 0f)
     }
 
-    /** pass 也占一手：行棋方只看总手数奇偶，与 pass 无关 */
     @Test
-    fun `passes keep alternating the side to move`() {
-        // 第 2 手是白棋 pass → 轮到黑棋，胜率原样；第 3 手是黑棋 pass → 轮到白棋，取反
-        assertEquals(0.25f, EngineValue.blackWinRate(0.25f, 2), 0f)
-        assertEquals(0.75f, EngineValue.blackWinRate(0.25f, 3), 0f)
+    fun `non alternating placements still convert by the real colour`() {
+        // 白棋行棋、却处在第 2 手（黑黑连摆的摆谱局面）：按奇偶会原样保留，正确的必须取反
+        val whiteToMoveAtPly2 = EngineValue.blackWinRate(0.25f, GoBoard.Color.WHITE)
+        assertEquals(0.75f, whiteToMoveAtPly2, 0f)
+    }
+}
+
+/** 扫描目标：曲线里缺评估的手数决定「补缺」要扫哪些手。 */
+class ScanPlanTest {
+
+    @Test
+    fun `a complete curve has no holes`() {
+        val curve = (1..5).associateWith { 0.5f }
+        assertEquals(emptyList<Int>(), ScanPlan.holes(curve, 5))
+    }
+
+    @Test
+    fun `missing keys are reported in ascending order`() {
+        val curve = mapOf(1 to 0.5f, 3 to 0.4f, 5 to 0.6f)
+        assertEquals(listOf(2, 4), ScanPlan.holes(curve, 5))
+    }
+
+    @Test
+    fun `NaN counts as missing`() {
+        val curve = mapOf(1 to Float.NaN, 2 to 0.5f)
+        assertEquals(listOf(1), ScanPlan.holes(curve, 2))
+    }
+
+    /** 曲线里比当前手数更远的手数（悔棋后又摆回的新分支）不属于本次扫描范围 */
+    @Test
+    fun `plies beyond the current move count are ignored`() {
+        val curve = mapOf(1 to 0.5f, 9 to 0.5f)
+        assertEquals(listOf(2, 3), ScanPlan.holes(curve, 3))
+    }
+
+    @Test
+    fun `an empty curve wants every ply`() {
+        assertEquals(listOf(1, 2, 3), ScanPlan.holes(emptyMap(), 3))
     }
 }
 

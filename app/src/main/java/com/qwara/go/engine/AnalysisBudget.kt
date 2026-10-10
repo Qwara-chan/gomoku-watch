@@ -26,6 +26,9 @@ class ScanBudget(
     /** 下一手的等待上限（毫秒） */
     fun next(): Int = budgetMs
 
+    /** 允许的最宽等待（毫秒）：重试空洞时直接给到这一档——那一手已经用较窄的窗口失败过一次 */
+    fun ceiling(): Int = ceilingMs
+
     /** 该手在第 [elapsedMs] 毫秒拿到首帧：按实测放宽，快的时候会收回 [floorMs] */
     fun succeeded(elapsedMs: Int) {
         budgetMs = maxOf((elapsedMs * factor).toInt(), floorMs).coerceAtMost(ceilingMs)
@@ -35,4 +38,16 @@ class ScanBudget(
     fun timedOut() {
         budgetMs = (budgetMs * 2).coerceAtMost(ceilingMs)
     }
+}
+
+/**
+ * 扫描目标：曲线里还缺评估的手数（全谱分析的「补缺」就是把它扫完）。
+ *
+ * 补缺而不是整条重算，是手表上能不能扫完的关键：每手要等引擎攒够 500 次模拟，
+ * 中断（熄屏、取消）后从头再来的代价是几分钟；而 [holes] 让那些已经算出来的手数原地保留。
+ */
+object ScanPlan {
+    /** 1..[total] 中尚无评估值（缺键或 NaN）的手数，升序 */
+    fun holes(curve: Map<Int, Float>, total: Int): List<Int> =
+        (1..total).filter { k -> curve[k]?.let { !it.isNaN() } != true }
 }
