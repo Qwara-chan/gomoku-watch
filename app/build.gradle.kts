@@ -21,6 +21,11 @@ val releaseKeystoreProps = Properties().apply {
 val appVersionName = providers.gradleProperty("appVersionName").orNull ?: "1.0.0"
 val appVersionCode = providers.gradleProperty("appVersionCode").orNull?.toIntOrNull() ?: 1
 
+// 引擎数据文件（patterns_mm.* + opening.dat，共 ~2.6MB）默认不打进 APK
+// （首次用引擎时联网下载，见 engine/EngineWeights.kt）；
+// 离线调试/内置包用 ./gradlew -PbundleWeights=true 恢复旧行为。
+val bundleWeights = providers.gradleProperty("bundleWeights").map { it.toBoolean() }.orElse(false).get()
+
 android {
     namespace = "com.qwara.go"
     compileSdk = 37
@@ -69,6 +74,12 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    androidResources {
+        // 数据文件默认不打进 APK（运行时联网下载）；-PbundleWeights=true 恢复内置。
+        // 实测 AGP 9.1.1：ignoreAssetsPattern 用「:」分隔多个模式（「;」「,」均不生效），
+        // 且不能带目录段；packaging.resources.excludes 对 assets 不生效
+        if (!bundleWeights) ignoreAssetsPattern = "*.gamma:*.spat:*.dat"
     }
     // 引擎数据文件已按 AGENTS.md 配方用 llvm-strip --strip-debug 处理过；
     // 禁止 AGP 用各机器版本不一的 strip 再削一层，保证 APK 内与提交字节一致

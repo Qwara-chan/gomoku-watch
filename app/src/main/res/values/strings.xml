@@ -134,4 +134,26 @@
     <string name="settings_about_author_url" translatable="false">https://github.com/Qwara-chan</string>
     <string name="settings_decrease">减少</string>
     <string name="settings_increase">增加</string>
+    <!-- 引擎数据文件（运行时下载） -->
+    <string name="menu_ai_sub_weights_missing">首次使用需下载约 %1$s 引擎数据</string>
+    <string name="menu_ai_sub_weights_downloading">引擎数据下载中…</string>
+    <string name="weights_title">引擎数据</string>
+    <string name="weights_desc">引擎的走子模式库与开局库不随安装包分发，首次使用人机/分析功能时下载一次（约 %1$s），支持断点续传；建议使用 Wi-Fi。</string>
+    <string name="weights_status_checking">检查中…</string>
+    <string name="weights_status_ready">已就绪 · %1$s</string>
+    <string name="weights_status_missing">未下载 · 共约 %1$s</string>
+    <string name="weights_status_missing_resume">未下载完 · 已有 %1$s / %2$s</string>
+    <string name="weights_status_failed">下载失败：%1$s</string>
+    <string name="weights_source">下载源</string>
+    <string name="weights_source_auto">自动</string>
+    <string name="weights_action_download">开始下载</string>
+    <string name="weights_action_retry">重试</string>
+    <string name="weights_action_cancel">取消</string>
+    <string name="weights_action_redownload">重新下载</string>
+    <string name="weights_action_delete">删除引擎数据</string>
+    <string name="weights_action_delete_confirm">再点一次确认删除</string>
+    <string name="weights_downloading_file">%1$d/%2$d · %3$s</string>
+    <string name="weights_downloading_progress">%1$s / %2$s · 源：%3$s</string>
+    <string name="settings_weights">引擎数据</string>
+    <string name="settings_weights_manage">管理</string>
 </resources>

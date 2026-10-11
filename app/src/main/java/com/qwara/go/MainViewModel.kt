@@ -8,18 +8,24 @@ import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.qwara.go.data.SettingsRepository
+import com.qwara.go.engine.EngineInstaller
 import com.qwara.go.engine.EngineStatus
 import com.qwara.go.engine.EngineValue
+import com.qwara.go.engine.EngineWeights
 import com.qwara.go.engine.HintPoint
 import com.qwara.go.engine.PachiEngine
 import com.qwara.go.engine.PvLine
 import com.qwara.go.engine.ScanBudget
 import com.qwara.go.engine.ScanPlan
+import com.qwara.go.engine.WeightsDownloader
 import com.qwara.go.game.GoBoard
 import com.qwara.go.ui.util.FeedbackHelper
+import java.io.File
+import java.util.concurrent.CancellationException
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -31,7 +37,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** 屏幕导航 */
-enum class Screen { MENU, GAME, ANALYSIS, SETTINGS }
+enum class Screen { MENU, GAME, ANALYSIS, SETTINGS, WEIGHTS }
 
 enum class GameMode { TWO_PLAYER, AI, ANALYSIS }
 
@@ -115,6 +121,17 @@ data class GameUiState(
     }
 }
 
+/** 引擎数据文件（~2.6MB，运行时下载）的安装/下载状态，驱动数据管理页与引擎功能门控 */
+sealed interface WeightsUi {
+    data object Checking : WeightsUi
+
+    /** 缺数据文件；[resumedBytes] 为断点续传已有的字节 */
+    data class Missing(val totalBytes: Long, val resumedBytes: Long) : WeightsUi
+    data class Downloading(val progress: WeightsDownloader.Progress) : WeightsUi
+    data class Ready(val sizeOnDisk: Long) : WeightsUi
+    data class Failed(val message: String) : WeightsUi
+}
+
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val settingsRepo = SettingsRepository(app)
@@ -165,7 +182,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 后台时取消了正在进行的全谱扫描：回前台需重扫 */
     private var scanWasRunning = false
 
+    /** 数据页状态（下载进度/就绪与否），主菜单 AI 按钮副标题与引擎门控都读它 */
+    private val _weights = MutableStateFlow<WeightsUi>(WeightsUi.Checking)
+    val weights: StateFlow<WeightsUi> = _weights
+
+    /** 数据下载任务；非空表示正在下载（取消保留 .part 断点） */
+    private var weightsJob: Job? = null
+
+    /** 进入数据页时所在的屏幕，返回时回到这里 */
+    private var weightsReturnTo: Screen = Screen.MENU
+
+    /** 因缺数据文件被拦下的动作（人机开局）：下载完成后自动继续 */
+    private var pendingAfterWeights: (() -> Unit)? = null
+
+    private val weightsDownloader = WeightsDownloader()
+
     init {
+        // 数据文件就绪状态是引擎功能的门控依据，启动时先算出来
+        refreshWeightsStatus()
         // 合并设置流：路数变化需要换棋盘对象；贴目/时间只是状态同步
         viewModelScope.launch {
             settingsRepo.settings.collect { s ->
@@ -291,6 +325,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun startGame(mode: GameMode, humanColor: GoBoard.Color) {
+        // AI 对局必须有引擎数据文件：缺文件时先去数据页下载，完成后自动回来继续开局
+        if (mode == GameMode.AI && _weights.value !is WeightsUi.Ready) {
+            viewModelScope.launch {
+                if (weightsReadyNow()) {
+                    startGame(mode, humanColor)
+                } else {
+                    pendingAfterWeights = { startGame(mode, humanColor) }
+                    openWeights()
+                }
+            }
+            return
+        }
         cancelFullScan()
         gameMode = mode
         board.clear()
@@ -362,6 +408,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+        // 后台期间下完的数据不在后台自动开局（continueAfterWeightsReady 拦下了 pending），回前台续上
+        if (_weights.value is WeightsUi.Ready) continueAfterWeightsReady()
     }
 
     // ------------------------------------------------------------- 输入
@@ -909,6 +957,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 确保引擎会话可用且与当前路数/贴目一致 */
     private suspend fun ensureEngine(): Boolean {
+        // 缺数据文件时先去数据页下载（这里不带待办，用户下载完回来再点一次即可）
+        if (!weightsReadyNow()) {
+            openWeights()
+            return false
+        }
         val s = settingsRepo.settings.value
         val key = s.boardSize to s.komi
         if (engine.isRunning && sessionKey == key) return true
@@ -916,6 +969,148 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         sessionKey = if (r.isSuccess) key else null
         if (r.isFailure) showMessage("引擎启动失败：${r.exceptionOrNull()?.message}")
         return r.isSuccess
+    }
+
+    // ------------------------------------------------------------- 数据下载
+
+    /** 真实检查一次数据文件状态（IO），并同步到 [_weights]。下载进行中不覆盖进度显示，一律按未就绪处理。 */
+    private suspend fun weightsReadyNow(): Boolean {
+        // 别用 weightsJob != null 判断下载中：下载成功的收尾（continueAfterWeightsReady → startGame
+        // → ensureEngine → 这里）就运行在下载协程内部，彼时 weightsJob 尚未清空（finally 才清），
+        // 会把「下完自动继续」误判成未就绪并跳回数据页。Downloading 状态本身才是准确判据。
+        if (_weights.value is WeightsUi.Downloading) return false
+        var st = withContext(Dispatchers.IO) { EngineInstaller.status(getApplication()) }
+        if (st !is EngineInstaller.WeightsStatus.Ready) {
+            // bundleWeights 内置包被清了数据/丢了戳：assets 里就有，原地解压自愈，不把用户带去下载页
+            // （下载版构建里 assets 没有数据文件，ensureEngineDataInstalled 抛异常，走正常缺失流程）
+            val healed = withContext(Dispatchers.IO) {
+                runCatching { EngineInstaller.ensureEngineDataInstalled(getApplication()) }.isSuccess
+            }
+            if (healed) st = withContext(Dispatchers.IO) { EngineInstaller.status(getApplication()) }
+        }
+        _weights.value = st.toUi()
+        return st is EngineInstaller.WeightsStatus.Ready
+    }
+
+    private fun EngineInstaller.WeightsStatus.toUi(): WeightsUi = when (this) {
+        is EngineInstaller.WeightsStatus.Ready -> WeightsUi.Ready(sizeOnDisk)
+        is EngineInstaller.WeightsStatus.Missing -> WeightsUi.Missing(EngineWeights.TOTAL_BYTES, resumedBytes)
+    }
+
+    /** 按磁盘实况刷新数据状态（下载进行中不刷，避免把进度显示刷没） */
+    fun refreshWeightsStatus() {
+        if (weightsJob != null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val st = EngineInstaller.status(getApplication()).toUi()
+            // IO 期间用户可能恰好点了下载：不能把进行中状态盖回去
+            if (weightsJob == null) _weights.value = st
+        }
+    }
+
+    /** 进入数据管理页（设置页入口与缺数据门控共用）；记住来源供返回 */
+    fun openWeights() {
+        weightsReturnTo = _screen.value
+        _screen.value = Screen.WEIGHTS
+        refreshWeightsStatus()
+    }
+
+    /** 数据页返回：回到来源页；未消费的待办动作（人机开局）作废 */
+    fun closeWeights() {
+        pendingAfterWeights = null
+        _screen.value = weightsReturnTo
+    }
+
+    /**
+     * 开始下载数据文件；[clearFirst] 为 true 时先删本地数据（「重新下载」）。
+     * 下载成功且有被门控拦下的动作时自动回到来源页并继续该动作。
+     */
+    fun startWeightsDownload(clearFirst: Boolean = false) {
+        if (weightsJob != null) return
+        val sourceIdx = settingsRepo.settings.value.weightsSource
+        // 自动 = 按序尝试全部源；指定源 = 只用那一个（失败即报错，由用户换源）
+        val sources = if (sourceIdx <= 0) {
+            EngineWeights.SOURCES
+        } else {
+            listOf(EngineWeights.SOURCES[(sourceIdx - 1).coerceIn(0, EngineWeights.SOURCES.lastIndex)])
+        }
+        // 立即给出下载中反馈：首个进度回调前要建连/解 assets，别让点击看着像没反应
+        val resumed = if (clearFirst) 0L else (_weights.value as? WeightsUi.Missing)?.resumedBytes ?: 0L
+        val first = EngineWeights.FILES.first()
+        _weights.value = WeightsUi.Downloading(
+            WeightsDownloader.Progress(
+                fileIndex = 0, fileName = first.name, fileDone = 0, fileTotal = first.size,
+                totalDone = resumed, totalBytes = EngineWeights.TOTAL_BYTES,
+                sourceLabel = sources.first().label,
+            ),
+        )
+        weightsJob = viewModelScope.launch {
+            try {
+                if (clearFirst) {
+                    withContext(Dispatchers.IO) { EngineInstaller.clearWeights(getApplication()) }
+                } else {
+                    // bundleWeights 内置包删掉数据后的恢复：assets 里就有，直接解压不必联网
+                    val fromAssets = withContext(Dispatchers.IO) {
+                        runCatching { EngineInstaller.ensureEngineDataInstalled(getApplication()) }.isSuccess
+                    }
+                    if (fromAssets) {
+                        _weights.value = WeightsUi.Ready(EngineWeights.TOTAL_BYTES)
+                        continueAfterWeightsReady()
+                        return@launch
+                    }
+                }
+                val dir = File(getApplication<Application>().filesDir, "engine")
+                val result = weightsDownloader.downloadAll(EngineWeights.FILES, dir, sources) { p ->
+                    _weights.value = WeightsUi.Downloading(p)
+                }
+                when (result) {
+                    WeightsDownloader.Result.Success -> {
+                        withContext(Dispatchers.IO) { EngineInstaller.markInstalled(getApplication()) }
+                        _weights.value = WeightsUi.Ready(EngineWeights.TOTAL_BYTES)
+                        continueAfterWeightsReady()
+                    }
+                    is WeightsDownloader.Result.Failed -> {
+                        _weights.value = WeightsUi.Failed(result.message)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // markInstalled 的 check()/IO 等意外异常不能崩 app：落成失败态由用户重试
+                _weights.value = WeightsUi.Failed(e.message ?: e.javaClass.simpleName)
+            } finally {
+                weightsJob = null
+                // 取消路径：状态还停在 Downloading，按磁盘实况回落（显示断点续传进度）
+                if (_weights.value is WeightsUi.Downloading) refreshWeightsStatus()
+            }
+        }
+    }
+
+    /** 下载完成：有因缺数据被拦下的动作就回来源页并继续（目前只有人机开局）；
+     *  在后台则不自动开局（pending 保留，回前台时由 onHostStarted 续上） */
+    private fun continueAfterWeightsReady() {
+        if (backgrounded) return
+        val act = pendingAfterWeights
+        pendingAfterWeights = null
+        if (act != null) {
+            _screen.value = weightsReturnTo
+            act()
+        }
+    }
+
+    /** 取消下载；.part 断点保留，下次接着下 */
+    fun cancelWeightsDownload() {
+        weightsJob?.cancel()
+    }
+
+    /** 删除本地数据文件（释放 ~2.6MB）；设置页里的管理动作 */
+    fun deleteWeights() {
+        weightsJob?.cancel()
+        viewModelScope.launch(Dispatchers.IO) {
+            // 等在途下载真正停下再删，否则下载循环可能把刚删的 .part 又写回来
+            weightsJob?.join()
+            EngineInstaller.clearWeights(getApplication())
+            _weights.value = EngineInstaller.status(getApplication()).toUi()
+        }
     }
 
     // ------------------------------------------------------------- 设置
@@ -930,6 +1125,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setShowCandidates(on: Boolean) = settingsRepo.setShowCandidates(on)
     fun setSound(on: Boolean) = settingsRepo.setSound(on)
     fun setVibrate(on: Boolean) = settingsRepo.setVibrate(on)
+    fun setWeightsSource(index: Int) = settingsRepo.setWeightsSource(index)
 
     // ------------------------------------------------------------- 内部
 

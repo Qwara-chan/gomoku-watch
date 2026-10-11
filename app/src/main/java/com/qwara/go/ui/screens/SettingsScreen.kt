@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -44,6 +45,7 @@ import com.qwara.go.MainViewModel
 import com.qwara.go.R
 import com.qwara.go.data.SettingsRepository
 import com.qwara.go.ui.components.ChoiceButton
+import com.qwara.go.ui.components.WideButton
 import com.qwara.go.ui.theme.CreamWhite
 import com.qwara.go.ui.theme.WoodAmber
 
@@ -53,6 +55,7 @@ private const val MAX_ENGINE_SEC = 10
 @Composable
 fun SettingsScreen(vm: MainViewModel) {
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val weights by vm.weights.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val versionName = remember(context) {
         runCatching {
@@ -234,6 +237,18 @@ fun SettingsScreen(vm: MainViewModel) {
                 onCheckedChange = vm::setVibrate,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.settings_vibrate)) },
+            )
+        }
+
+        item {
+            SettingLabel(stringResource(R.string.settings_weights))
+        }
+        item {
+            WideButton(
+                text = stringResource(R.string.settings_weights_manage),
+                subtitle = weightsStatusText(weights),
+                icon = Icons.Default.Settings,
+                onClick = vm::openWeights,
             )
         }
 

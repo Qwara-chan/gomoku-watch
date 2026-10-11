@@ -5,7 +5,7 @@ name: build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, go-pachi ]
     tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
@@ -19,6 +19,11 @@ on:
 
 permissions:
   contents: write   # 创建 Release（含手动打标签）与滚动预发布 tag 需要
+
+# 同一 ref 的并发运行串行排队（不取消在途）：两个运行同时「补传缺失资产」会重复 create/upload
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -114,6 +119,56 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "发布版本：$NAME（versionCode $CODE）"
 
+      - name: Verify data manifest matches repo files
+        # EngineWeights.kt 钉死了每个数据文件的大小与 SHA-256（应用按它校验下载结果）。
+        # 仓库里的文件变了而清单没跟上时，发出的 APK 会永远校验失败——在这里提前拦住。
+        # 两个方向都查：清单里的文件必须存在且匹配；assets 里的文件也必须都在清单中
+        # （漏进清单的文件不会被打包排除/下载管理覆盖，悄无声息地打进 APK）。
+        run: |
+          KTS=app/src/main/java/com/qwara/go/engine/EngineWeights.kt
+          ASSETS=app/src/main/assets/engine/common
+          for name in $(grep -oP '^\s*"\K[a-z0-9_.]+\.(dat|gamma|spat)(?=",)' $KTS | sort -u); do
+            EXPECT=$(grep -A3 "\"$name\"" $KTS | grep -oP '"\K[0-9a-f]{64}(?=")')
+            EXPECT_SIZE=$(grep -A3 "\"$name\"" $KTS | grep -oP '^\s*\K[0-9]+(?=L,)')
+            ACTUAL=$(sha256sum "$ASSETS/$name" | cut -d' ' -f1)
+            ACTUAL_SIZE=$(stat -c %s "$ASSETS/$name")
+            echo "$name: manifest=$EXPECT actual=$ACTUAL size=$ACTUAL_SIZE/$EXPECT_SIZE"
+            test "$EXPECT" = "$ACTUAL" || { echo "::error::数据文件 $name 的 SHA-256 与 EngineWeights.kt 清单不一致"; exit 1; }
+            test "$EXPECT_SIZE" = "$ACTUAL_SIZE" || { echo "::error::数据文件 $name 的 size 与 EngineWeights.kt 清单不一致"; exit 1; }
+          done
+          for f in "$ASSETS"/*; do
+            base=$(basename "$f")
+            grep -q "\"$base\"" $KTS || { echo "::error::$base 在 assets 里但不在 EngineWeights.kt 清单中"; exit 1; }
+          done
+
+      - name: Publish engine data release
+        # 数据文件运行时下载的宿主：固定 tag（EngineWeights.kt 的 RELEASE_TAG）的 prerelease。
+        # Release 已存在时只补缺失资产，绝不覆盖——旧版本 APK 按 SHA-256 校验，字节必须不变；
+        # 换数据文件请连 RELEASE_TAG 一起换（go-engine-data-v2 …），老版本继续下旧 tag。
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          KTS=app/src/main/java/com/qwara/go/engine/EngineWeights.kt
+          TAG=$(grep -oP 'RELEASE_TAG = "\K[^"]+' $KTS)
+          ASSETS=app/src/main/assets/engine/common
+          FILES=$(grep -oP '^\s*"\K[a-z0-9_.]+\.(dat|gamma|spat)(?=",)' $KTS | sort -u)
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "创建数据 Release $TAG"
+            (cd $ASSETS && gh release create "$TAG" --prerelease --target "$GITHUB_SHA" \
+              --title "围棋引擎数据 $TAG" \
+              --notes "Pachi 引擎的走子模式库与开局库，应用首次使用引擎功能时按需下载。不要改动本 Release 的资产（老版本 APK 按 SHA-256 校验）；换数据文件请改用新 tag。" \
+              $FILES)
+          else
+            EXISTING=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+            for f in $FILES; do
+              if ! grep -qx "$f" <<< "$EXISTING"; then
+                echo "补传缺失资产 $f"
+                (cd $ASSETS && gh release upload "$TAG" "$f")
+              fi
+            done
+          fi
+
       - name: Unit tests
         env:
           VERSION_ARGS: ${{ steps.version.outputs.version_args }}
@@ -144,6 +199,11 @@ jobs:
           test "${RULES:-0}" -ge 1000 || { echo "::error::release APK 的 baseline profile 缺少应用自有规则（预期 ≥1000）"; exit 1; }
           test "$LIB" = "467584" || { echo "::error::arm64 libpachi.so 与仓库提交版本不一致（预期 467584 字节）"; exit 1; }
           test "$LIB7" = "436916" || { echo "::error::armeabi-v7a libpachi.so 与仓库提交版本不一致（预期 436916 字节）"; exit 1; }
+          # 数据文件不打进 APK（ignoreAssetsPattern，见 app/build.gradle.kts）：失效时在这里拦住，
+          # 而不是等发布后才看到包变胖
+          if unzip -l "$RELEASE_APK" | grep -q 'assets/engine/common/'; then
+            echo "::error::release APK 不应包含引擎数据文件（应运行时下载）"; exit 1
+          fi
           if [ -n "$EXPECTED_VERSION" ]; then
             # 直接读 APK 清单（而不是 AGP 的 output-metadata.json），验的就是真正发出去的那个包
             AAPT2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | tail -1)

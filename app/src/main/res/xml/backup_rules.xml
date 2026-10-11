@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 引擎数据文件（filesDir/engine，~2.6MB）不进云备份：可重新下载，没必要占配额 -->
+<full-backup-content>
+    <exclude domain="file" path="engine" />
+</full-backup-content>

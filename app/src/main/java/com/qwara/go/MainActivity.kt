@@ -18,6 +18,7 @@ import com.qwara.go.ui.screens.AnalysisScreen
 import com.qwara.go.ui.screens.GameScreen
 import com.qwara.go.ui.screens.MenuScreen
 import com.qwara.go.ui.screens.SettingsScreen
+import com.qwara.go.ui.screens.WeightsScreen
 import com.qwara.go.ui.theme.GoTheme
 
 class MainActivity : ComponentActivity() {
@@ -48,5 +49,6 @@ fun GoRoot(vm: MainViewModel = viewModel()) {
         Screen.GAME -> GameScreen(vm)
         Screen.ANALYSIS -> AnalysisScreen(vm)
         Screen.SETTINGS -> SettingsScreen(vm)
+        Screen.WEIGHTS -> WeightsScreen(vm)
     }
 }

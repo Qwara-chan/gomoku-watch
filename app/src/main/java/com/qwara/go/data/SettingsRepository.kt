@@ -24,6 +24,8 @@ class SettingsRepository(context: Context) {
         val showCandidates: Boolean = true,
         val sound: Boolean = true,
         val vibrate: Boolean = true,
+        /** 数据文件下载源：0 = 自动按序尝试；i+1 = 固定用 EngineWeights.SOURCES[i] */
+        val weightsSource: Int = 0,
     )
 
     private val prefs: SharedPreferences =
@@ -41,6 +43,7 @@ class SettingsRepository(context: Context) {
         showCandidates = prefs.getBoolean(KEY_SHOW_CANDIDATES, true),
         sound = prefs.getBoolean(KEY_SOUND, true),
         vibrate = prefs.getBoolean(KEY_VIBRATE, true),
+        weightsSource = prefs.getInt(KEY_WEIGHTS_SOURCE, 0),
     )
 
     private fun save(s: Settings) {
@@ -53,6 +56,7 @@ class SettingsRepository(context: Context) {
             .putBoolean(KEY_SHOW_CANDIDATES, s.showCandidates)
             .putBoolean(KEY_SOUND, s.sound)
             .putBoolean(KEY_VIBRATE, s.vibrate)
+            .putInt(KEY_WEIGHTS_SOURCE, s.weightsSource)
             .apply()
         _settings.value = s
     }
@@ -65,6 +69,7 @@ class SettingsRepository(context: Context) {
     fun setShowCandidates(on: Boolean) = save(_settings.value.copy(showCandidates = on))
     fun setSound(on: Boolean) = save(_settings.value.copy(sound = on))
     fun setVibrate(on: Boolean) = save(_settings.value.copy(vibrate = on))
+    fun setWeightsSource(index: Int) = save(_settings.value.copy(weightsSource = index))
 
     companion object {
         val BOARD_SIZES = intArrayOf(9, 13, 19)
@@ -80,5 +85,6 @@ class SettingsRepository(context: Context) {
         private const val KEY_SHOW_CANDIDATES = "show_candidates"
         private const val KEY_SOUND = "sound"
         private const val KEY_VIBRATE = "vibrate"
+        private const val KEY_WEIGHTS_SOURCE = "weights_source"
     }
 }

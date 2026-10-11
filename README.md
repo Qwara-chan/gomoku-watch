@@ -43,8 +43,11 @@ app/src/main/java/com/qwara/go/
 引擎编译为 JNI 共享库 `libpachi.so`（arm64-v8a / armeabi-v7a / x86_64），在 App 进程内
 以独立线程运行 GTP 协议循环，标准输入输出经 dup2 管道重定向对接 Kotlin 层
 （Android SELinux 禁止 exec 应用数据目录下的独立可执行文件，因此采用进程内 JNI 方案）。
-模式库与开局库打包在 `app/src/main/assets/engine/common/`，首次使用时解压到私有目录作引擎工作目录；
-缺失时引擎自动降级为纯蒙特卡洛。
+模式库与开局库（`patterns_mm.*` + `opening.dat`，共约 2.6MB）**不打进 APK**：首次使用人机/分析
+功能时从本仓库的固定 tag Release（`go-engine-data-v1`）或其镜像站（jsDelivr / gh-proxy / ghfast，
+见 `engine/EngineWeights.kt`）联网下载，带断点续传与 SHA-256 校验。
+离线调试可用 `./gradlew -PbundleWeights=true :app:assembleDebug` 打出内置数据的包。
+缺失时引擎自动降级为纯蒙特卡洛（UI 层的下载门控保证正常用户不会走到这条降级路径）。
 Pachi 源码：`github.com/pasky/pachi`（GPL-2.0-or-later）；引擎版本 12.84。
 
 围棋规则在本地 `GoBoard` 完成：无气提子、自杀禁着、单劫禁着（与上一手全局同形判禁）、
@@ -74,7 +77,7 @@ Pachi 源码：`github.com/pasky/pachi`（GPL-2.0-or-later）；引擎版本 12.
 GitHub 访问不畅时，可用 `https://gh-proxy.com/https://github.com/...` 代理克隆
 Pachi 仓库。
 
-发布包体积：单 ABI 约 2.4MB / universal 约 3.3MB（含模式库与开局库；不再有 NNUE 权重的 30MB，debug 包约 15MB 仅供真机调试）。
+发布包体积：单 ABI 约 1.9MB / universal 约 2.9MB（模式库与开局库改为首次用时联网下载约 2.6MB；debug 包约 15MB 仅供真机调试）。
 
 ## 自动构建（GitHub Actions）
 
