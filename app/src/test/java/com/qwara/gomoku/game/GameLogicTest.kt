@@ -255,3 +255,40 @@ class BoardTest {
         assertTrue(free!!.win)
     }
 }
+
+/**
+ * 行棋方推算：曲线换算和扫描都用它。不能用「手数奇偶」代替——摆谱可以连摆同色子，
+ * 翻转棋盘还能让白先行，奇偶一旦与实际不符，胜率换算会整段取反。
+ */
+class SideToMoveTest {
+
+    private fun moves(vararg colors: Board.Color): List<Board.Move> =
+        colors.mapIndexed { i, c -> Board.Move(i, i, c) }
+
+    @Test
+    fun `an empty board is black to move`() {
+        assertEquals(Board.Color.BLACK, Board.sideToMoveAfter(emptyList()))
+    }
+
+    @Test
+    fun `alternating moves hand over to the other colour`() {
+        assertEquals(Board.Color.WHITE, Board.sideToMoveAfter(moves(Board.Color.BLACK)))
+        assertEquals(
+            Board.Color.BLACK,
+            Board.sideToMoveAfter(moves(Board.Color.BLACK, Board.Color.WHITE)),
+        )
+    }
+
+    /** 连摆同色子（分析页摆谱）：只看最后一手的颜色，不看手数奇偶 */
+    @Test
+    fun `consecutive same-colour stones decide by the last move`() {
+        val sandbox = moves(Board.Color.BLACK, Board.Color.BLACK, Board.Color.BLACK)
+        assertEquals(Board.Color.WHITE, Board.sideToMoveAfter(sandbox))
+    }
+
+    /** 翻转棋盘后白先行 */
+    @Test
+    fun `white can start the game`() {
+        assertEquals(Board.Color.BLACK, Board.sideToMoveAfter(moves(Board.Color.WHITE)))
+    }
+}

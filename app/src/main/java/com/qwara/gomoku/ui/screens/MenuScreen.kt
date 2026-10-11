@@ -36,6 +36,8 @@ import androidx.compose.material.icons.filled.Star
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qwara.gomoku.MainViewModel
 import com.qwara.gomoku.R
+import com.qwara.gomoku.WeightsUi
+import com.qwara.gomoku.engine.EngineWeights
 import com.qwara.gomoku.game.Board
 import com.qwara.gomoku.ui.components.ChoiceButton
 import com.qwara.gomoku.ui.components.WideButton
@@ -47,8 +49,18 @@ fun MenuScreen(vm: MainViewModel) {
     // 弹窗里选中的执子：勾按它开局，叉取消
     var chosenColor by remember { mutableStateOf(Board.Color.BLACK) }
     val state by vm.ui.collectAsStateWithLifecycle()
+    val weights by vm.weights.collectAsStateWithLifecycle()
     // 内存里还留着没下完的棋：给一个明确的"回去接着下"入口
     val resumable = state.moves.isNotEmpty() && state.gameOver == null
+    // 缺权重时在人机入口上预告下载量，避免点了才被带去下载页；下载中给进行态而不是「缺权重」
+    val aiSubtitle = when (weights) {
+        is WeightsUi.Ready, WeightsUi.Checking -> stringResource(R.string.menu_ai_sub)
+        is WeightsUi.Downloading -> stringResource(R.string.menu_ai_sub_weights_downloading)
+        else -> stringResource(
+            R.string.menu_ai_sub_weights_missing,
+            EngineWeights.formatBytes(EngineWeights.TOTAL_BYTES),
+        )
+    }
 
     ScalingLazyColumn(
         modifier = Modifier
@@ -88,7 +100,7 @@ fun MenuScreen(vm: MainViewModel) {
         item {
             WideButton(
                 text = stringResource(R.string.menu_ai),
-                subtitle = stringResource(R.string.menu_ai_sub),
+                subtitle = aiSubtitle,
                 icon = Icons.Default.Star,
                 onClick = { showColorDialog = true },
             )

@@ -7,16 +7,23 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.qwara.gomoku.data.SettingsRepository
+import com.qwara.gomoku.engine.EngineInstaller
 import com.qwara.gomoku.engine.EngineStatus
 import com.qwara.gomoku.engine.EngineValue
+import com.qwara.gomoku.engine.EngineWeights
 import com.qwara.gomoku.engine.PvLine
 import com.qwara.gomoku.engine.RapfiEngine
+import com.qwara.gomoku.engine.ScanPlan
+import com.qwara.gomoku.engine.WeightsDownloader
 import com.qwara.gomoku.game.Board
 import com.qwara.gomoku.game.RenjuRules
 import com.qwara.gomoku.game.Rule
 import com.qwara.gomoku.ui.util.FeedbackHelper
+import java.io.File
+import java.util.concurrent.CancellationException
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -28,7 +35,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** 屏幕导航 */
-enum class Screen { MENU, GAME, ANALYSIS, SETTINGS }
+enum class Screen { MENU, GAME, ANALYSIS, SETTINGS, WEIGHTS }
 
 enum class GameMode { TWO_PLAYER, AI, ANALYSIS }
 
@@ -36,6 +43,15 @@ enum class GameOver { BLACK_WIN, WHITE_WIN, DRAW }
 
 /** 全谱分析每手思考时长（毫秒）：档位越低越快，40 手约 25 秒 */
 private const val SCAN_TIME_MS = 600
+
+/**
+ * 一轮全谱分析最多跑几趟。第一趟扫目标手数，只把仍然失败（这一手没等到评估）的手数交给第二趟，
+ * 那一趟给足两倍时长——失败的手往往是引擎在这点上报得特别晚，用同样的窗口再等一遍还是白等。
+ */
+private const val SCAN_PASSES = 2
+
+/** 重试手（第二趟）的每手思考时长 */
+private const val SCAN_RETRY_TIME_MS = SCAN_TIME_MS * 2
 
 /**
  * 搜索中段 PV 状态推送的最小间隔。引擎每次迭代×每路变例都会发一次状态，
@@ -68,7 +84,7 @@ data class GameUiState(
     val viewPly: Int? = null,
     /** 评估曲线：手数 → 黑方胜率（0..1） */
     val curve: Map<Int, Float> = emptyMap(),
-    /** 全谱分析进度（已分析手数 / 总手数+1） */
+    /** 全谱分析进度（已评估手数 / 总手数） */
     val scan: Progress? = null,
     val editMode: Boolean = false,
     val editColor: Board.Color = Board.Color.BLACK,
@@ -106,6 +122,17 @@ data class GameUiState(
     }
 }
 
+/** 引擎权重（~28.5MB，运行时下载）的安装/下载状态，驱动权重管理页与引擎功能门控 */
+sealed interface WeightsUi {
+    data object Checking : WeightsUi
+
+    /** 缺权重；[resumedBytes] 为断点续传已有的字节 */
+    data class Missing(val totalBytes: Long, val resumedBytes: Long) : WeightsUi
+    data class Downloading(val progress: WeightsDownloader.Progress) : WeightsUi
+    data class Ready(val sizeOnDisk: Long) : WeightsUi
+    data class Failed(val message: String) : WeightsUi
+}
+
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val settingsRepo = SettingsRepository(app)
@@ -130,6 +157,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 全谱分析任务；非空表示正在扫描（此时禁止一切改局面操作） */
     private var scanJob: Job? = null
 
+    /**
+     * 全谱分析代号：开扫与取消都 +1。取消后旧任务的 `finally` 会看到代号已变，
+     * 于是不再去清理/回写（否则「取消后立刻续算」会被旧任务把进度、局面和引擎盘面一起覆盖）。
+     */
+    private var scanGeneration = 0
+
     /** 进入分析页的来源：来自对局时「返回」一定回对局 */
     private var analysisOrigin: Screen = Screen.MENU
 
@@ -148,8 +181,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 后台时取消了正在进行的全谱扫描：回前台需重扫 */
     private var scanWasRunning = false
 
+    /** 权重页状态（下载进度/就绪与否），主菜单 AI 按钮副标题与引擎门控都读它 */
+    private val _weights = MutableStateFlow<WeightsUi>(WeightsUi.Checking)
+    val weights: StateFlow<WeightsUi> = _weights
+
+    /** 权重下载任务；非空表示正在下载（取消保留 .part 断点） */
+    private var weightsJob: Job? = null
+
+    /** 进入权重页时所在的屏幕，返回时回到这里 */
+    private var weightsReturnTo: Screen = Screen.MENU
+
+    /** 因缺权重被拦下的动作（人机开局）：下载完成后自动继续 */
+    private var pendingAfterWeights: (() -> Unit)? = null
+
+    private val weightsDownloader = WeightsDownloader()
+
     init {
         board.rule = settingsRepo.settings.value.rule
+        // 权重就绪状态是引擎功能的门控依据，启动时先算出来
+        refreshWeightsStatus()
         // 合并设置流
         viewModelScope.launch {
             settingsRepo.settings.collect { s ->
@@ -191,12 +241,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.update { ui ->
                     // 曲线记录并入同一次状态更新，避免每路 PV 触发两次全量拷贝
                     var curve = ui.curve
-                    if (scanJob == null && !ui.editMode) {
+                    // 只记「当前局面」的评估：停止搜索不清候选，相位落回 IDLE 后仍可能来一次
+                    // 带上一手候选的发射（取消扫描、退后台都会），按手数写曲线就会把别的局面
+                    // 的胜率盖到当前手数上——末点反向、跳变都是这么来的。
+                    if (scanJob == null && !ui.editMode && st.pvPly == board.moveCount) {
                         val wr = st.pvLines.firstOrNull()?.winRate
                         if (wr != null && !wr.isNaN()) {
-                            val ply = board.moveCount
-                            val black = EngineValue.blackWinRate(wr, ply)
-                            if (ui.curve[ply] != black) curve = ui.curve + (ply to black)
+                            val black = EngineValue.blackWinRate(wr, st.pvToMove)
+                            if (ui.curve[st.pvPly] != black) curve = ui.curve + (st.pvPly to black)
                         }
                     }
                     ui.copy(
@@ -275,6 +327,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun startGame(mode: GameMode, humanColor: Board.Color) {
+        // AI 对局必须有引擎权重：缺权重时先去权重页下载，完成后自动回来继续开局
+        if (mode == GameMode.AI && _weights.value !is WeightsUi.Ready) {
+            viewModelScope.launch {
+                if (weightsReadyNow()) {
+                    startGame(mode, humanColor)
+                } else {
+                    pendingAfterWeights = { startGame(mode, humanColor) }
+                    openWeights()
+                }
+            }
+            return
+        }
         cancelFullScan()
         gameMode = mode
         board.clear()
@@ -304,7 +368,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val ok = engine.startNewGame(s.rule, s.engineTimeSec * 1000)
                 if (ok.isFailure) {
                     sessionRule = null
-                    showMessage("引擎启动失败")
+                    // 权重被删/未下载而绕过了门控：去权重页，完成后继续开局
+                    if (ok.exceptionOrNull() is EngineInstaller.WeightsNotInstalledException) {
+                        pendingAfterWeights = { startGame(mode, humanColor) }
+                        openWeights()
+                    } else {
+                        showMessage("引擎启动失败")
+                    }
                     return@launch
                 }
                 sessionRule = s.rule
@@ -352,7 +422,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         scanWasRunning = false
         resumeAnalysisOnStart = false
         when {
-            resumeScan -> startFullScan()
+            // 熄屏/退后台会中断扫描（持续 CPU 任务留在后台只是耗电），回来接着补缺：
+            // 已经算出来的手数原地保留，不再从头重算
+            resumeScan -> startFullScan(resumeOnly = true)
             resumeAnalysis && _screen.value == Screen.ANALYSIS && _ui.value.mode == GameMode.ANALYSIS -> {
                 viewModelScope.launch {
                     if (!ensureEngine()) return@launch
@@ -362,6 +434,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+        // 后台期间下完的权重不在后台自动开局（continueAfterWeightsReady 拦下了 pending），回前台续上
+        if (_weights.value is WeightsUi.Ready) continueAfterWeightsReady()
     }
 
     // ------------------------------------------------------------- 输入
@@ -505,9 +579,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             redoStack.addLast(m)
         }
         hintActive = false
+        pruneCurve()
         _ui.update { it.copy(gameOver = null, hint = null, winLine = emptyList()) }
         refresh()
         if (s.mode == GameMode.ANALYSIS) restartAnalysisIfActive()
+    }
+
+    /**
+     * 悔棋后手数变小，比当前手数更远的手数对应的局面已经不存在了：曲线里那一段必须丢掉，
+     * 否则「续算时跳过已有评估」会把它们当成有效值留在曲线末端（随后又在新分支上写同一批手数，
+     * 曲线就出现台阶/断口）。
+     */
+    private fun pruneCurve() {
+        val n = board.moveCount
+        _ui.update { ui ->
+            if (ui.curve.keys.none { it > n }) ui
+            else ui.copy(curve = ui.curve.filterKeys { it <= n })
+        }
     }
 
     fun redo() {
@@ -639,74 +727,145 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
 
-    /** 全谱分析：逐手限时搜索，生成整局评估曲线；用 [cancelFullScan] 中断 */
-    fun startFullScan() {
+    /**
+     * 全谱分析：逐手限时搜索，生成整局评估曲线；用 [cancelFullScan] 中断。
+     *
+     * 扫哪些手由曲线现状决定：**已有评估值的手数一律跳过**（[ScanPlan.holes]）。扫描随时可能被
+     * 中断（熄屏、取消、退后台），从头再来的代价是把手表上已经算出来的部分重算一遍；
+     * 曲线一手不缺时才整条重算，于是 ↻ 永远不会变成「点了没反应」。
+     *
+     * @param resumeOnly 只为续算而开（回前台自动恢复）：没有缺手就直接结束，不做整条重算——
+     *   自动恢复不该在用户没要求时从头扫一遍
+     */
+    fun startFullScan(resumeOnly: Boolean = false) {
         val s = _ui.value
-        if (engineThinkingNow() || scanJob != null || s.viewPly != null) return
+        if (engineThinkingNow() || scanJob != null) return
         if (board.moveCount == 0) {
             showMessage("先在棋盘上走出着法")
             return
         }
+        val moves = board.moves.toList()
+        val total = moves.size
+        val holes = ScanPlan.holes(s.curve, total)
+        if (holes.isEmpty() && resumeOnly) return
+        // 有缺手就补缺（未扫到的手数沿用已有曲线），一手不缺才整条重算
+        val targets = if (holes.isEmpty()) (1..total).toList() else holes
+        if (holes.isNotEmpty()) showMessage("继续分析 · 补 ${holes.size} 手")
+        // 复盘浏览中也能开扫：扫描自己会逐手把局面推给 viewPly。以前这里直接 return，
+        // 而曲线图表只要被碰到一下就会设 viewPly，等于把扫描键悄无声息地锁死。
+        if (s.viewPly != null) setViewPly(null)
+        val generation = ++scanGeneration
         scanJob = viewModelScope.launch {
             aiMoveInFlight = true
-            val moves = board.moves.toList()
-            // 从第 1 手开始：空盘由引擎开局库直接应答，不输出任何 INFO PV/胜率，扫了也没有评估值
-            val total = moves.size
-            val history = HashMap<Int, Float>()
+            // 未扫到的手数沿用已有曲线：中断/失败不至于把上一次的数据一并抹掉
+            val history = HashMap(_ui.value.curve.filterKeys { it <= total })
+            var interrupted = false
             try {
                 if (!ensureEngine()) return@launch
-                _ui.update { it.copy(scan = GameUiState.Progress(0, total), curve = emptyMap()) }
-                for (k in 1..total) {
-                    // 逐手改盘面前必须确认引擎空闲：思考期间 YXBOARD 会被丢弃
-                    if (!engine.stopAndAwait()) {
-                        showMessage("引擎无响应，分析中断")
-                        break
+                pushScan(history, total)
+                var queue = targets
+                var pass = 0
+                var lastPassOk = 0
+                while (queue.isNotEmpty() && pass < SCAN_PASSES) {
+                    // 上一趟一手都没成功说明引擎整体不出数据（会话没了/命令被丢），
+                    // 再来一趟只会把同样的等待再耗一遍
+                    if (pass > 0 && lastPassOk == 0) break
+                    val failed = mutableListOf<Int>()
+                    var ok = 0
+                    for (k in queue) {
+                        // 逐手改盘面前必须确认引擎空闲：思考期间 YXBOARD 会被丢弃
+                        if (!engine.stopAndAwait()) {
+                            interrupted = true
+                            break
+                        }
+                        // 第一趟用常规时长；重试手给两倍——上一趟它在同样窗口里没上报
+                        engine.scanAnalyze(moves.take(k), if (pass > 0) SCAN_RETRY_TIME_MS else SCAN_TIME_MS)
+                        val wr = engine.status.value.pvLines.firstOrNull()?.winRate
+                        if (wr != null && !wr.isNaN()) {
+                            // 胜率是行棋方视角，按**真实**行棋方换算：摆谱可连摆同色子、翻转可白先行，
+                            // 用手数奇偶推断会让曲线从某一手起整段取反
+                            history[k] = EngineValue.blackWinRate(wr, moves[k - 1].color.opponent)
+                            ok++
+                        } else {
+                            failed.add(k)
+                        }
+                        // 棋盘跟随扫描进度显示被分析的局面，曲线同步增长
+                        pushScan(history, total, k)
                     }
-                    engine.scanAnalyze(moves.take(k), SCAN_TIME_MS)
-                    val wr = engine.status.value.pvLines.firstOrNull()?.winRate
-                    if (wr != null && !wr.isNaN()) history[k] = EngineValue.blackWinRate(wr, k)
-                    // 棋盘跟随扫描进度显示被分析的局面，曲线同步增长
+                    if (interrupted) break
+                    lastPassOk = ok
+                    queue = failed
+                    pass++
+                }
+                reportScanResult(history, total, interrupted)
+            } finally {
+                // 代号变了说明这次扫描已经被取消并可能已有新扫描接手：不要再回写现状
+                if (scanGeneration == generation) {
+                    scanJob = null
+                    aiMoveInFlight = false
+                    // 同 withAiMoveInFlight：清零锁后重算思考态，避免停在“引擎思考中”
                     _ui.update {
-                        it.copy(
-                            scan = GameUiState.Progress(k, total),
-                            curve = history.toMap(),
-                            viewPly = k,
-                        )
+                        it.copy(scan = null, viewPly = null, engineThinking = engineThinkingNow())
                     }
                     refresh()
-                }
-            } finally {
-                scanJob = null
-                aiMoveInFlight = false
-                // 同 withAiMoveInFlight：清零锁后重算思考态，避免停在“引擎思考中”
-                _ui.update {
-                    it.copy(scan = null, viewPly = null, engineThinking = engineThinkingNow())
-                }
-                refresh()
-                val mode = _ui.value.mode
-                if (_screen.value == Screen.ANALYSIS && mode == GameMode.ANALYSIS) {
-                    // 扫描把引擎盘面/时限改成了最后一手：仍在分析页时恢复实时分析
-                    restartAnalysisIfActive()
-                } else if (mode == GameMode.AI) {
-                    // 对局中被扫描打断：把引擎内部盘面同步回实战局面。应着现在每次都整盘重摆
-                    // （playUserMove 发完整 YXBOARD），所以这一步只是让引擎保持在对局局面上、
-                    // 顺手把可能还在跑的搜索停干净。
-                    // 取消路径（后台/用户中断）时任务已取消，挂起调用必须包 NonCancellable
-                    // 才能真正执行，否则 withContext 在入口就抛取消异常、引擎盘面留在扫描中途
-                    withContext(NonCancellable) {
-                        if (engine.stopAndAwait()) engine.syncBoard(board.moves.toList())
+                    val mode = _ui.value.mode
+                    if (_screen.value == Screen.ANALYSIS && mode == GameMode.ANALYSIS) {
+                        // 扫描把引擎盘面/时限改成了最后一手：仍在分析页时恢复实时分析
+                        restartAnalysisIfActive()
+                    } else if (mode == GameMode.AI) {
+                        // 对局中被扫描打断：把引擎内部盘面同步回实战局面。应着现在每次都整盘重摆
+                        // （playUserMove 发完整 YXBOARD），所以这一步只是让引擎保持在对局局面上、
+                        // 顺手把可能还在跑的搜索停干净。
+                        // 取消路径（后台/用户中断）时任务已取消，挂起调用必须包 NonCancellable
+                        // 才能真正执行，否则 withContext 在入口就抛取消异常、引擎盘面留在扫描中途
+                        withContext(NonCancellable) {
+                            if (engine.stopAndAwait()) engine.syncBoard(board.moves.toList())
+                        }
                     }
                 }
             }
         }
     }
 
+    /** 推进扫描进度与曲线。[viewPly] 非空时把棋盘推到正在分析的局面 */
+    private fun pushScan(history: Map<Int, Float>, total: Int, viewPly: Int? = null) {
+        var done = 0
+        for (k in 1..total) {
+            val v = history[k]
+            if (v != null && !v.isNaN()) done++
+        }
+        _ui.update {
+            it.copy(
+                scan = GameUiState.Progress(done, total),
+                curve = history.toMap(),
+                viewPly = viewPly ?: it.viewPly,
+            )
+        }
+        refresh()
+    }
+
+    /** 扫描收尾文案：缺手数按「1..total 里真正没有评估值的手数」算，不只看失败次数 */
+    private fun reportScanResult(history: Map<Int, Float>, total: Int, interrupted: Boolean) {
+        val missing = ScanPlan.holes(history, total).size
+        when {
+            interrupted -> showMessage("引擎无响应 · 已评估 ${total - missing}/$total 手")
+            missing == total -> showMessage("引擎未返回评估，请重试")
+            missing > 0 -> showMessage("全谱分析完成 · $missing 手无评估")
+            else -> showMessage("全谱分析完成")
+        }
+    }
+
     fun cancelFullScan() {
         val job = scanJob ?: return
+        scanGeneration++
         scanJob = null
         job.cancel()
         // 扫描可能正停在一次引擎搜索里：补发 STOP，避免后续命令被引擎丢弃
         engine.stop()
+        // 立刻把界面从「扫描中」放出来（被取消任务自己的 finally 已过期，不会再做清理）
+        aiMoveInFlight = false
+        _ui.update { it.copy(scan = null, viewPly = null, engineThinking = engineThinkingNow()) }
+        refresh()
     }
 
     /** 采纳引擎最佳着法（分析模式） */
@@ -731,12 +890,156 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 确保引擎会话可用且与当前规则一致 */
     private suspend fun ensureEngine(): Boolean {
+        // 缺权重时先去权重页下载（这里不带待办，用户下载完回来再点一次即可）
+        if (!weightsReadyNow()) {
+            openWeights()
+            return false
+        }
         val s = settingsRepo.settings.value
         if (engine.isRunning && sessionRule == s.rule) return true
         val r = engine.startNewGame(s.rule, s.engineTimeSec * 1000)
         sessionRule = if (r.isSuccess) s.rule else null
         if (r.isFailure) showMessage("引擎启动失败：${r.exceptionOrNull()?.message}")
         return r.isSuccess
+    }
+
+    // ------------------------------------------------------------- 权重下载
+
+    /** 真实检查一次权重状态（IO），并同步到 [_weights]。下载进行中不覆盖进度显示，一律按未就绪处理。 */
+    private suspend fun weightsReadyNow(): Boolean {
+        if (weightsJob != null) return false
+        var st = withContext(Dispatchers.IO) { EngineInstaller.status(getApplication()) }
+        if (st !is EngineInstaller.WeightsStatus.Ready) {
+            // bundleWeights 内置包被清了权重/丢了戳：assets 里就有，原地解压自愈，不把用户带去下载页
+            // （下载版构建里 assets 没有大权重，ensureWeightsInstalled 抛异常，走正常缺失流程）
+            val healed = withContext(Dispatchers.IO) {
+                runCatching { EngineInstaller.ensureWeightsInstalled(getApplication()) }.isSuccess
+            }
+            if (healed) st = withContext(Dispatchers.IO) { EngineInstaller.status(getApplication()) }
+        }
+        _weights.value = st.toUi()
+        return st is EngineInstaller.WeightsStatus.Ready
+    }
+
+    private fun EngineInstaller.WeightsStatus.toUi(): WeightsUi = when (this) {
+        is EngineInstaller.WeightsStatus.Ready -> WeightsUi.Ready(sizeOnDisk)
+        is EngineInstaller.WeightsStatus.Missing -> WeightsUi.Missing(EngineWeights.TOTAL_BYTES, resumedBytes)
+    }
+
+    /** 按磁盘实况刷新权重状态（下载进行中不刷，避免把进度显示刷没） */
+    fun refreshWeightsStatus() {
+        if (weightsJob != null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val st = EngineInstaller.status(getApplication()).toUi()
+            // IO 期间用户可能恰好点了下载：不能把进行中状态盖回去
+            if (weightsJob == null) _weights.value = st
+        }
+    }
+
+    /** 进入权重管理页（设置页入口与缺权重门控共用）；记住来源供返回 */
+    fun openWeights() {
+        weightsReturnTo = _screen.value
+        _screen.value = Screen.WEIGHTS
+        refreshWeightsStatus()
+    }
+
+    /** 权重页返回：回到来源页；未消费的待办动作（人机开局）作废 */
+    fun closeWeights() {
+        pendingAfterWeights = null
+        _screen.value = weightsReturnTo
+    }
+
+    /**
+     * 开始下载权重；[clearFirst] 为 true 时先删本地权重（「重新下载」）。
+     * 下载成功且有被门控拦下的动作时自动回到来源页并继续该动作。
+     */
+    fun startWeightsDownload(clearFirst: Boolean = false) {
+        if (weightsJob != null) return
+        val sourceIdx = settingsRepo.settings.value.weightsSource
+        // 自动 = 按序尝试全部源；指定源 = 只用那一个（失败即报错，由用户换源）
+        val sources = if (sourceIdx <= 0) {
+            EngineWeights.SOURCES
+        } else {
+            listOf(EngineWeights.SOURCES[(sourceIdx - 1).coerceIn(0, EngineWeights.SOURCES.lastIndex)])
+        }
+        // 立即给出下载中反馈：首个进度回调前要建连/解 assets，别让点击看着像没反应
+        val resumed = if (clearFirst) 0L else (_weights.value as? WeightsUi.Missing)?.resumedBytes ?: 0L
+        val first = EngineWeights.FILES.first()
+        _weights.value = WeightsUi.Downloading(
+            WeightsDownloader.Progress(
+                fileIndex = 0, fileName = first.name, fileDone = 0, fileTotal = first.size,
+                totalDone = resumed, totalBytes = EngineWeights.TOTAL_BYTES,
+                sourceLabel = sources.first().label,
+            ),
+        )
+        weightsJob = viewModelScope.launch {
+            try {
+                if (clearFirst) {
+                    withContext(Dispatchers.IO) { EngineInstaller.clearWeights(getApplication()) }
+                } else {
+                    // bundleWeights 内置包删掉权重后的恢复：assets 里就有，直接解压不必联网
+                    val fromAssets = withContext(Dispatchers.IO) {
+                        runCatching { EngineInstaller.ensureWeightsInstalled(getApplication()) }.isSuccess
+                    }
+                    if (fromAssets) {
+                        _weights.value = WeightsUi.Ready(EngineWeights.TOTAL_BYTES)
+                        continueAfterWeightsReady()
+                        return@launch
+                    }
+                }
+                val dir = File(getApplication<Application>().filesDir, "engine")
+                val result = weightsDownloader.downloadAll(EngineWeights.FILES, dir, sources) { p ->
+                    _weights.value = WeightsUi.Downloading(p)
+                }
+                when (result) {
+                    WeightsDownloader.Result.Success -> {
+                        withContext(Dispatchers.IO) { EngineInstaller.markInstalled(getApplication()) }
+                        _weights.value = WeightsUi.Ready(EngineWeights.TOTAL_BYTES)
+                        continueAfterWeightsReady()
+                    }
+                    is WeightsDownloader.Result.Failed -> {
+                        _weights.value = WeightsUi.Failed(result.message)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // markInstalled 的 check()/IO 等意外异常不能崩 app：落成失败态由用户重试
+                _weights.value = WeightsUi.Failed(e.message ?: e.javaClass.simpleName)
+            } finally {
+                weightsJob = null
+                // 取消路径：状态还停在 Downloading，按磁盘实况回落（显示断点续传进度）
+                if (_weights.value is WeightsUi.Downloading) refreshWeightsStatus()
+            }
+        }
+    }
+
+    /** 下载完成：有因缺权重被拦下的动作就回来源页并继续（目前只有人机开局）；
+     *  在后台则不自动开局（pending 保留，回前台时由 onHostStarted 续上） */
+    private fun continueAfterWeightsReady() {
+        if (backgrounded) return
+        val act = pendingAfterWeights
+        pendingAfterWeights = null
+        if (act != null) {
+            _screen.value = weightsReturnTo
+            act()
+        }
+    }
+
+    /** 取消下载；.part 断点保留，下次接着下 */
+    fun cancelWeightsDownload() {
+        weightsJob?.cancel()
+    }
+
+    /** 删除本地权重（释放 ~28.5MB）；设置页里的管理动作 */
+    fun deleteWeights() {
+        weightsJob?.cancel()
+        viewModelScope.launch(Dispatchers.IO) {
+            // 等在途下载真正停下再删，否则下载循环可能把刚删的 .part 又写回来
+            weightsJob?.join()
+            EngineInstaller.clearWeights(getApplication())
+            _weights.value = EngineInstaller.status(getApplication()).toUi()
+        }
     }
 
     // ------------------------------------------------------------- 设置
@@ -753,6 +1056,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setShowCandidates(on: Boolean) = settingsRepo.setShowCandidates(on)
     fun setSound(on: Boolean) = settingsRepo.setSound(on)
     fun setVibrate(on: Boolean) = settingsRepo.setVibrate(on)
+    fun setWeightsSource(index: Int) = settingsRepo.setWeightsSource(index)
 
     // ------------------------------------------------------------- 内部
 
@@ -788,9 +1092,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun GameUiState.sideToMoveFor(b: Board): Board.Color =
-        if (b.moveCount == 0) Board.Color.BLACK else b.moves.last().color.opponent
-
-    /** 前 [ply] 手形成的盘面（复盘浏览用；只读，不影响真实对局） */
+        Board.sideToMoveAfter(b.moves)    /** 前 [ply] 手形成的盘面（复盘浏览用；只读，不影响真实对局） */
     private fun gridAt(moves: List<Board.Move>, ply: Int): ByteArray {
         val g = ByteArray(board.size * board.size)
         for (i in 0 until ply.coerceIn(0, moves.size)) {

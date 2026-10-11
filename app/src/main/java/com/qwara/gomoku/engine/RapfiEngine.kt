@@ -168,7 +168,8 @@ class RapfiEngine(private val context: Context) {
     /** 引擎执黑先行，返回引擎着法；[strength] 为棋力档位（0–100，100=满强度） */
     suspend fun engineMoveFirst(strength: Int): Result<Pt> = withContext(writeDispatcher) {
         runCatching {
-            prepareSearch(EngineStatus.Phase.THINKING)
+            // 引擎执黑先行：局面就是空盘（0 手、黑方行棋）
+            prepareSearch(EngineStatus.Phase.THINKING, 0, Board.Color.BLACK)
             // 先装挂起点再发命令：引擎应答可能早于挂起点建立
             requestMoves {
                 sendStrength(strength)
@@ -203,7 +204,11 @@ class RapfiEngine(private val context: Context) {
         if (!stopAndAwait(STOP_BEFORE_TURN_MS)) return Result.failure(EngineException("引擎无响应"))
         return withContext(writeDispatcher) {
             runCatching {
-                prepareSearch(EngineStatus.Phase.THINKING)
+                prepareSearch(
+                    EngineStatus.Phase.THINKING,
+                    position.size,
+                    Board.sideToMoveAfter(position),
+                )
                 requestMoves {
                     sendBoard(position)
                     send("INFO TIMEOUT_TURN $timeMs")
@@ -258,7 +263,7 @@ class RapfiEngine(private val context: Context) {
         send("INFO TIMEOUT_TURN $timeMs")
         // 关键：棋力档位会限制深度并在候选中随机挑点，会污染分析结论，分析前必须恢复满强度
         sendStrength(FULL_STRENGTH)
-        prepareSearch(EngineStatus.Phase.ANALYZING)
+        prepareSearch(EngineStatus.Phase.ANALYZING, moves.size, Board.sideToMoveAfter(moves))
         sendBoard(moves)
         // YXBOARD 不触发思考；开始 N 路分析
         send("YXNBEST $nbest")
@@ -322,12 +327,18 @@ class RapfiEngine(private val context: Context) {
 
     // --------------------------------------------------------- 内部
 
-    /** 标记一次搜索开始：清空上一次的 PV/推荐点，并把阶段置为搜索中。 */
-    private fun prepareSearch(phase: EngineStatus.Phase) {
+    /** 标记一次搜索开始：清空上一次的 PV/推荐点，记下这是哪个局面，并把阶段置为搜索中。 */
+    private fun prepareSearch(phase: EngineStatus.Phase, ply: Int, toMove: Board.Color) {
         curPv = null
         pvAccumulator = linkedMapOf()
         _status.update {
-            it.copy(phase = phase, pvLines = emptyList(), bestMoves = emptyList())
+            it.copy(
+                phase = phase,
+                pvLines = emptyList(),
+                bestMoves = emptyList(),
+                pvPly = ply,
+                pvToMove = toMove,
+            )
         }
     }
 

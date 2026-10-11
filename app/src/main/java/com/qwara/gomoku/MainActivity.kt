@@ -18,6 +18,7 @@ import com.qwara.gomoku.ui.screens.AnalysisScreen
 import com.qwara.gomoku.ui.screens.GameScreen
 import com.qwara.gomoku.ui.screens.MenuScreen
 import com.qwara.gomoku.ui.screens.SettingsScreen
+import com.qwara.gomoku.ui.screens.WeightsScreen
 import com.qwara.gomoku.ui.theme.GomokuTheme
 
 class MainActivity : ComponentActivity() {
@@ -48,5 +49,6 @@ fun GomokuRoot(vm: MainViewModel = viewModel()) {
         Screen.GAME -> GameScreen(vm)
         Screen.ANALYSIS -> AnalysisScreen(vm)
         Screen.SETTINGS -> SettingsScreen(vm)
+        Screen.WEIGHTS -> WeightsScreen(vm)
     }
 }

@@ -21,6 +21,10 @@ val releaseKeystoreProps = Properties().apply {
 val appVersionName = providers.gradleProperty("appVersionName").orNull ?: "1.0.0"
 val appVersionCode = providers.gradleProperty("appVersionCode").orNull?.toIntOrNull() ?: 1
 
+// 三个 ~10MB 的 NNUE 权重默认不打进 APK（首次用引擎时联网下载，见 engine/EngineWeights.kt）；
+// 离线调试/内置包用 ./gradlew -PbundleWeights=true 恢复旧行为。
+val bundleWeights = providers.gradleProperty("bundleWeights").map { it.toBoolean() }.orElse(false).get()
+
 android {
     namespace = "com.qwara.gomoku"
     compileSdk = 37
@@ -70,9 +74,13 @@ android {
     buildFeatures {
         compose = true
     }
-    // 引擎可执行文件禁止压缩，确保可直接提取执行
+    // .bin（model210901.bin）与 .bin.lz4（bundleWeights 内置时）都是压缩/二进制内容，
+    // 禁止 aapt 再压一层；注意 noCompress 匹配的是最后一个扩展名，.bin.lz4 要写的是 lz4
     androidResources {
-        noCompress += listOf("bin")
+        noCompress += listOf("bin", "lz4")
+        // 大权重默认不打进 APK（运行时联网下载）；-PbundleWeights=true 恢复内置。
+        // ignoreAssetsPattern 的 * 只匹配单路径段，所以用扩展名通配而不是带目录的 glob
+        if (!bundleWeights) ignoreAssetsPattern = "*.bin.lz4"
     }
     packaging {
         jniLibs {

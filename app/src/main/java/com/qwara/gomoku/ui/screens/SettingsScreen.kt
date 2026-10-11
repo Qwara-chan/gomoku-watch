@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -45,6 +46,7 @@ import com.qwara.gomoku.R
 import com.qwara.gomoku.data.SettingsRepository
 import com.qwara.gomoku.game.Rule
 import com.qwara.gomoku.ui.components.ChoiceButton
+import com.qwara.gomoku.ui.components.WideButton
 import com.qwara.gomoku.ui.theme.CreamWhite
 import com.qwara.gomoku.ui.theme.WoodAmber
 
@@ -63,6 +65,7 @@ private val STRENGTH_LABELS = intArrayOf(
 @Composable
 fun SettingsScreen(vm: MainViewModel) {
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val weights by vm.weights.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val versionName = remember(context) {
         runCatching {
@@ -268,6 +271,18 @@ fun SettingsScreen(vm: MainViewModel) {
                 onCheckedChange = vm::setVibrate,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.settings_vibrate)) },
+            )
+        }
+
+        item {
+            SettingLabel(stringResource(R.string.settings_weights))
+        }
+        item {
+            WideButton(
+                text = stringResource(R.string.settings_weights_manage),
+                subtitle = weightsStatusText(weights),
+                icon = Icons.Default.Settings,
+                onClick = vm::openWeights,
             )
         }
 

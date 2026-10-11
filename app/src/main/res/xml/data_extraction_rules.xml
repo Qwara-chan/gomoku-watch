@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 同 backup_rules.xml：云备份与设备间迁移都排除可重新下载的引擎权重目录 -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="engine" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="engine" />
+    </device-transfer>
+</data-extraction-rules>

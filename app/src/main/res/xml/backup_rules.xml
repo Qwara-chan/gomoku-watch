@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 引擎权重（filesDir/engine，~28.5MB）不进云备份：可重新下载，且单应用 25MB 配额会被它一个目录打爆 -->
+<full-backup-content>
+    <exclude domain="file" path="engine" />
+</full-backup-content>

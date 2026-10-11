@@ -35,7 +35,8 @@
 ```
 app/src/main/java/com/qwara/gomoku/
 ├── game/       Board（棋盘/胜负）、RenjuRules（连珠禁手）
-├── engine/     RapfiEngine（协议编排）、RapfiNative（JNI 桥）、EngineInstaller（权重安装）
+├── engine/     RapfiEngine（协议编排）、RapfiNative（JNI 桥）、EngineInstaller（权重安装）、
+│               EngineWeights / WeightsDownloader（权重的运行时下载：多源、断点续传、SHA-256 校验）
 ├── data/       SettingsRepository
 ├── ui/         Wear Compose 界面（board 自绘 Canvas 棋盘、screens、theme）
 └── MainViewModel.kt  状态与引擎编排
@@ -43,8 +44,11 @@ app/src/main/java/com/qwara/gomoku/
 
 引擎编译为 JNI 共享库 `librapfi.so`（arm64-v8a / armeabi-v7a / x86_64），在 App 进程内
 以独立线程运行 Piskvork/Yixin 协议循环，标准输入输出经 streambuf 重定向对接 Kotlin 层。
-NNUE 权重与配置打包在 `app/src/main/assets/engine/common/`，首次使用时解压到私有目录
-（Android SELinux 禁止 exec 应用数据目录下的独立可执行文件，因此采用进程内 JNI 方案）。
+NNUE 权重（三个 ~10MB 的 `.bin.lz4`）**不打进 APK**：首次使用人机/分析功能时从本仓库的
+固定 tag Release（`engine-weights-v1`）或其镜像站（jsDelivr / gh-proxy / ghfast，见
+`engine/EngineWeights.kt`）联网下载，带断点续传与 SHA-256 校验；`config.toml` 等小文件仍随包内置。
+离线调试可用 `./gradlew -PbundleWeights=true :app:assembleDebug` 打出内置权重的包。
+（Android SELinux 禁止 exec 应用数据目录下的独立可执行文件，因此采用进程内 JNI 方案。）
 Rapfi 源码：`github.com/dhbloo/rapfi`（GPLv3）；引擎版本 0.43.02。
 
 禁手判定在本地 `RenjuRules` 完成（未用引擎的 `YXSHOWFORBID`），按定义而非形状模式实现：
@@ -82,7 +86,8 @@ maven("https://maven.aliyun.com/repository/central")
 GitHub 访问不畅时，可用 `https://gh-proxy.com/https://github.com/...` 代理克隆
 Rapfi 及其权重仓库（`dhbloo/rapfi-networks`）。
 
-发布包体积：debug 约 48MB、release（R8 压缩后）约 36MB。
+发布包体积（权重不内置，首次用引擎功能时联网下载 ~28.5MB）：release 单 ABI 约 3.2–4.0MB、
+universal 约 8.2MB；debug universal 约 48MB（dex 未压缩，仅供真机调试）。
 
 ## 自动构建（GitHub Actions）
 
@@ -128,7 +133,8 @@ JNI 封装、两处上游补丁与桌面校验器都在仓库内的 `engine-src/
   本仓库打包的是它的 JNI 共享库产物，**对应源码在 `engine-src/`**（JNI 封装 + 两处补丁 + 构建说明），
   上游基线提交 `3c94c2a9`。
 - **NNUE 权重**（`app/src/main/assets/engine/common/*.bin*`）：来自
-  <https://github.com/dhbloo/rapfi-networks>，CC0-1.0，可自由分发。
+  <https://github.com/dhbloo/rapfi-networks>，CC0-1.0，可自由分发。文件随源码仓库分发，
+  但不打进 APK（应用运行时按 `EngineWeights.kt` 清单下载并校验）。
 - **AndroidX / Jetpack Compose for Wear OS / Material 图标**：Apache-2.0；**Gradle wrapper**：Apache-2.0。
 
 APK 内也附了一份 GPL-3.0 全文与第三方声明（`app/src/main/assets/licenses/`）；
