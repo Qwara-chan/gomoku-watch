@@ -907,7 +907,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 真实检查一次权重状态（IO），并同步到 [_weights]。下载进行中不覆盖进度显示，一律按未就绪处理。 */
     private suspend fun weightsReadyNow(): Boolean {
-        if (weightsJob != null) return false
+        // 别用 weightsJob != null 判断下载中：下载成功的收尾（continueAfterWeightsReady → startGame
+        // → ensureEngine → 这里）就运行在下载协程内部，彼时 weightsJob 尚未清空（finally 才清），
+        // 会把「下完自动继续」误判成未就绪并跳回权重页。Downloading 状态本身才是准确判据。
+        if (_weights.value is WeightsUi.Downloading) return false
         var st = withContext(Dispatchers.IO) { EngineInstaller.status(getApplication()) }
         if (st !is EngineInstaller.WeightsStatus.Ready) {
             // bundleWeights 内置包被清了权重/丢了戳：assets 里就有，原地解压自愈，不把用户带去下载页
